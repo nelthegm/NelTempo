@@ -257,6 +257,11 @@ body.ndi-suppress-native-tracker .combat-tracker {
   box-shadow: none;
 }
 
+.ndi-portrait-main:focus-visible {
+  outline: 2px solid rgba(214, 166, 42, 0.95);
+  outline-offset: 2px;
+}
+
 .ndi-portrait-main:disabled {
   cursor: default;
 }

@@ -9,6 +9,7 @@ import {
   LIFECYCLE_STATUS,
 } from "./lifecycle.js";
 import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
+import { activateCombatantPortrait } from "./portrait-activation.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
 import { isTimingEnforced } from "./timing-service.js";
 import {
@@ -331,9 +332,9 @@ function portraitHTML(combatant, state) {
       : "";
 
   return `<article class="${portraitClasses(combatant, state)}" data-combatant-id="${combatant.id}">
-    <button type="button" class="ndi-portrait-main" data-action="claim" data-combatant-id="${combatant.id}" ${canUserClaim(combatant, state) ? "" : "disabled"}>
+    <button type="button" class="ndi-portrait-main" data-action="activate-portrait" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Portrait.ActivateToken"))}" aria-label="${escapeHTML(t("NDI.Portrait.ActivateToken"))}">
       <span class="ndi-image-wrap">
-        <img src="${escapeHTML(portraitFor(combatant))}" alt="${escapeHTML(combatantName(combatant))}">
+        <img src="${escapeHTML(portraitFor(combatant))}" alt="${escapeHTML(combatantName(combatant))}" draggable="false">
         ${resultBadge}
         ${endedBadge}
         ${timingBadge}
@@ -833,6 +834,16 @@ function bindDockEvents(root, combat, state) {
     const combatantId = target.dataset.combatantId;
 
     switch (action) {
+      case "activate-portrait": {
+        // Local token navigation first — never gated on claim eligibility.
+        await activateCombatantPortrait(combat, combatantId);
+        // Preserve free-order claim when the combatant may currently act.
+        const claimCombatant = getCombatant(combat, combatantId);
+        if (claimCombatant && canUserClaim(claimCombatant, state) && state.phase !== PHASES.INITIATIVE) {
+          await requestAction(REQUESTS.CLAIM, { combatantId });
+        }
+        break;
+      }
       case "claim":
         if (!target.disabled && state.phase !== PHASES.INITIATIVE) await requestAction(REQUESTS.CLAIM, { combatantId });
         break;

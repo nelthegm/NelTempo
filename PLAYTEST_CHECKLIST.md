@@ -1,4 +1,4 @@
-# NelTempo v0.3.0 — Playtest Checklist
+# NelTempo v0.3.1 — Playtest Checklist
 
 *Formerly Dynamic Initiative.* Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
@@ -95,6 +95,20 @@ See `docs/SLICE_0_3_0_TEST_PLAN.md`.
 - [ ] Dual-GM or stale dialog: one mutation succeeds; other gets state-changed message.
 - [ ] Undo after current-phase join shows placement state-only warning.
 - [ ] Confirm 0.2.2 sheet layering still correct with editor DialogV2 open/closed.
+
+## Portrait activation (0.3.1)
+
+See `docs/SLICE_0_3_1_TEST_PLAN.md`.
+
+- [ ] With no token controlled, click a PC portrait; exact token controls and camera pans (setting on).
+- [ ] With another token controlled, click a portrait; prior control releases and only the clicked token remains.
+- [ ] With multiple tokens controlled, click one portrait; only that token remains.
+- [ ] Click the already controlled portrait; it stays controlled (does not toggle off) and pans.
+- [ ] Disable **Pan Camera When Activating Portrait**; click another portrait; token changes without camera move.
+- [ ] Off-scene combatant: notification, no scene switch, prior control preserved.
+- [ ] Player unauthorized token: permission notification; prior control preserved.
+- [ ] End Turn / Delay / placement editor clicks do not also activate the token.
+- [ ] Keyboard Enter/Space on portrait; hover highlight still works; sheets remain above NelTempo.
 
 ## Rearguard and Next Round
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Portrait clicks activate the combatant’s exact canvas token locally, releasing the user’s other controlled tokens first.
+- Client setting **Pan Camera When Activating Portrait** (default on) smoothly pans to the token center after control.
+- Activation works regardless of claim/End Turn eligibility; off-scene tokens do not switch scenes or clear control.
+- Documentation: `docs/SLICE_0_3_1_PORTRAIT_ACTIVATION.md`, `docs/SLICE_0_3_1_TEST_PLAN.md`.
+
 ## 0.3.0
 
 - Added GM-only **Edit Initiative Placement** DialogV2 (This Round / Next Round).

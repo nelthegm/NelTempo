@@ -13,7 +13,8 @@ npm test
 Lifecycle plan: `docs/SLICE_0_2_0_TEST_PLAN.md`.  
 Condition timing plan (0.2.1): `docs/SLICE_0_2_1_TEST_PLAN.md`.  
 UI layering plan (0.2.2): `docs/SLICE_0_2_2_UI_LAYERING.md`.  
-GM placement editor (0.3.0): `docs/SLICE_0_3_0_TEST_PLAN.md`.
+GM placement editor (0.3.0): `docs/SLICE_0_3_0_TEST_PLAN.md`.  
+Portrait activation (0.3.1): `docs/SLICE_0_3_1_TEST_PLAN.md`.
 
 | # | Check | Covered by |
 | --- | --- | --- |

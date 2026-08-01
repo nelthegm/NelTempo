@@ -51,7 +51,7 @@ const en = JSON.parse(readFileSync(join(root, "lang/en.json"), "utf8"));
 // --- Branding ---
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
-assert.equal(moduleJson.version, "0.3.0");
+assert.equal(moduleJson.version, "0.3.1");
 assert.equal(MODULE_TITLE, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");
 assert.equal(SOCKET_NAME, "module.nel-dynamic-initiative");

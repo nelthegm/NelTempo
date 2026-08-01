@@ -160,5 +160,14 @@
   "NDI.Placement.ReplaceQueuedConfirm": "Replace the existing next-round placement correction?",
   "NDI.Placement.NextRoundHint": "Next Round: {phase}",
   "NDI.Placement.NextRoundShort": "NR:{phase}",
-  "NDI.Placement.DialogUnavailable": "Placement editor requires DialogV2."
+  "NDI.Placement.DialogUnavailable": "Placement editor requires DialogV2.",
+
+  "NDI.Portrait.ActivateToken": "Activate Token",
+  "NDI.Portrait.OffScene": "This combatant’s token is not on the active scene.",
+  "NDI.Portrait.NoPermission": "You do not have permission to control this combatant.",
+  "NDI.Portrait.TokenMissing": "Combatant token could not be found.",
+  "NDI.Portrait.CanvasNotReady": "Canvas is not ready.",
+
+  "NDI.Setting.PanCameraOnPortrait.Name": "Pan Camera When Activating Portrait",
+  "NDI.Setting.PanCameraOnPortrait.Hint": "When enabled, clicking a NelTempo portrait centers your camera on that combatant’s token."
 }

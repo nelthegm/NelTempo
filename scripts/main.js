@@ -99,6 +99,15 @@ function registerSettings() {
     type: Boolean,
     default: false,
   });
+
+  game.settings.register(MODULE_ID, SETTINGS.PAN_CAMERA_ON_PORTRAIT, {
+    name: "NDI.Setting.PanCameraOnPortrait.Name",
+    hint: "NDI.Setting.PanCameraOnPortrait.Hint",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
+  });
 }
 
 function addTrackerLauncher(_app, html) {

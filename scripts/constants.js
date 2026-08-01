@@ -14,6 +14,8 @@ export const SETTINGS = Object.freeze({
   AUTO_ADVANCE_PHASE: "autoAdvancePhase",
   /** Enforce Grabbed/Restrained/Confused timing restrictions */
   ENFORCE_CONDITION_TIMING: "enforceConditionTiming",
+  /** Client: pan camera when activating a portrait token */
+  PAN_CAMERA_ON_PORTRAIT: "panCameraOnPortraitActivation",
 });
 
 export const AUTO_ADVANCE = Object.freeze({
