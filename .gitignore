@@ -1,0 +1,48 @@
+# Build output
+dist/
+*.zip
+!**/fixtures/**/*.zip
+
+# Dependencies
+node_modules/
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+playwright-report/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.log
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / editor caches
+.idea/
+.vscode/
+*.code-workspace
+.history/
+.cursor/
+.claude/
+.codex/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Package manager noise
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

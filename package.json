@@ -1,0 +1,8 @@
+{
+  "name": "nel-dynamic-initiative",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/state-machine.test.mjs"
+  }
+}
