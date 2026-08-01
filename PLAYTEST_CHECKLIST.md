@@ -1,4 +1,4 @@
-# NelTempo v0.2.1 — Playtest Checklist
+# NelTempo v0.2.2 — Playtest Checklist
 
 *Formerly Dynamic Initiative.* Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
@@ -66,6 +66,20 @@ Requires **Enforce Condition Timing** on (default). See `docs/SLICE_0_2_1_TEST_P
 - [ ] GM **Resolve Priority** / **Skip Priority** advances gate without removing Confused.
 - [ ] Player cannot **Reopen Turn** after a Confused-resolved turn; GM **Reopen Confused Turn** works with confirm.
 - [ ] Toggle **Enforce Condition Timing** off; confirm Delay and End Turn unrestricted.
+
+## UI layering and badges (0.2.2)
+
+See `docs/SLICE_0_2_2_UI_LAYERING.md`.
+
+- [ ] Open a PC Actor sheet over the NelTempo carousel; sheet renders above NelTempo.
+- [ ] Click sheet controls where the carousel is behind; clicks reach the sheet.
+- [ ] Repeat with NPC sheet, Item sheet, Journal, and a DialogV2 confirmation.
+- [ ] Focus alternating overlapping sheets; Foundry window order remains normal.
+- [ ] Close all sheets; NelTempo remains above the canvas and usable.
+- [ ] Apply Grabbed; Delay is greyed out with Grabbed tooltip; **no Delay Blocked text covers the portrait**.
+- [ ] Repeat for Restrained and Confused Delay tooltips without portrait Delay Blocked overlays.
+- [ ] Confirm **Must Act First** / **Waiting for Confused Turn** still appear for Confused priority.
+- [ ] Refresh with Grabbed active; no Delay Blocked portrait overlay returns.
 
 ## Rearguard and Next Round
 

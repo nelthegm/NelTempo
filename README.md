@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.2.1  
+**Current version:** 0.2.2  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.3.0, Forge VTT hosting
 
@@ -195,6 +195,7 @@ game.dynamicInitiative.end();
 - `docs/ARCHITECTURE.md` — state ownership, normalization, persistence
 - `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` — phase lifecycle (0.2.0)
 - `docs/SLICE_0_2_1_CONDITION_TIMING.md` — condition timing (0.2.1)
+- `docs/SLICE_0_2_2_UI_LAYERING.md` — sheet layering and Delay badge cleanup (0.2.2)
 - `docs/MAINTENANCE_V14_STATE_REPAIR.md` — V14 repair notes
 - `docs/TEST_PLAN.md` — static, mocked, and runtime test plan
 - `docs/SLICE_0_2_1_TEST_PLAN.md` — 0.2.1 timing verification

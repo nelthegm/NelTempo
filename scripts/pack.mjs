@@ -37,6 +37,7 @@ const INCLUDE = [
   "assets/icon.svg",
   "docs/SLICE_0_2_1_CONDITION_TIMING.md",
   "docs/SLICE_0_2_1_TEST_PLAN.md",
+  "docs/SLICE_0_2_2_UI_LAYERING.md",
 ];
 
 function ensureIncludes() {

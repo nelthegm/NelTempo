@@ -51,7 +51,7 @@ const en = JSON.parse(readFileSync(join(root, "lang/en.json"), "utf8"));
 // --- Branding ---
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
-assert.equal(moduleJson.version, "0.2.1");
+assert.equal(moduleJson.version, "0.2.2");
 assert.equal(MODULE_TITLE, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");
 assert.equal(SOCKET_NAME, "module.nel-dynamic-initiative");
@@ -482,5 +482,55 @@ assert.ok(adapterSrc.includes("confused"));
 // No monkey-patch of PF2e classes in timing modules
 const timingSrc = readFileSync(join(root, "scripts/timing.js"), "utf8");
 assert.equal(timingSrc.includes("prototype"), false);
+
+// --- Slice 0.2.2 UI layering and Delay badge cleanup ---
+const cssSrc = readFileSync(join(root, "styles/dynamic-initiative.css"), "utf8");
+assert.ok(cssSrc.includes("--ndi-interface-z"));
+assert.ok(cssSrc.includes("--z-index-app"));
+assert.ok(cssSrc.includes("var(--ndi-interface-z)"));
+assert.equal(/#ndi-dock\s*\{[^}]*z-index:\s*110\b/s.test(cssSrc), false);
+assert.equal(/#ndi-launcher\s*\{[^}]*z-index:\s*109\b/s.test(cssSrc), false);
+assert.equal(/z-index:\s*110\b/.test(cssSrc), false);
+assert.equal(/z-index:\s*109\b/.test(cssSrc), false);
+assert.equal(/z-index:\s*10000\b/.test(cssSrc), false);
+
+const uiSrc = readFileSync(join(root, "scripts/ui.js"), "utf8");
+assert.ok(uiSrc.includes("isPortraitOverlayBadge"));
+assert.ok(uiSrc.includes("CannotDelayGrabbed"));
+assert.ok(uiSrc.includes("CannotDelayRestrained"));
+assert.ok(uiSrc.includes("CannotDelayConfused"));
+assert.ok(uiSrc.includes("aria-disabled"));
+assert.equal(/\.bringToFront\s*\(/.test(uiSrc), false);
+assert.equal(/foundry\.applications\.api\.ApplicationV2/.test(uiSrc), false);
+assert.equal(/style\.zIndex\s*=/.test(uiSrc), false);
+// Delay-blocked overlay keys are filtered from portrait badges
+assert.match(uiSrc, /isPortraitOverlayBadge\(badgeKey\)/);
+assert.match(uiSrc, /isPortraitOverlayBadge\(badge\)/);
+
+// timingBadgeFor still reports delay-blocked for state/tests
+lc = createLifecycle({
+  phase: PHASES.VANGUARD,
+  round: 1,
+  roster: ["blockedOnly"],
+  phaseInstanceId: "badge-delay",
+});
+lc.status = LIFECYCLE_STATUS.OPEN;
+lc.timing = createTiming({ phaseInstanceId: "badge-delay" });
+lc.timing = upsertCombatantConditions(lc.timing, "blockedOnly", { grabbed: true });
+lc.timing = recomputePriorityGate(lc.timing, lc);
+assert.equal(timingBadgeFor(lc, "blockedOnly", { enforce: true }), "delay-blocked-grabbed");
+assert.equal(evaluateDelayEligibility(lc, "blockedOnly", { enforce: true }).allowed, false);
+assert.equal(evaluateDelayEligibility(lc, "blockedOnly", { enforce: true }).blockReason, "grabbed");
+
+// Locale strings retained for tooltips / rejection
+assert.ok(en["NDI.Timing.DelayBlockedGrabbed"]);
+assert.ok(en["NDI.Timing.CannotDelayGrabbed"]);
+assert.ok(en["NDI.Timing.MustActFirst"]);
+assert.ok(en["NDI.Timing.WaitingConfused"]);
+
+const controllerSrc = readFileSync(join(root, "scripts/controller.js"), "utf8");
+assert.ok(controllerSrc.includes("CannotDelayGrabbed"));
+assert.equal(controllerSrc.includes("bringToFront"), false);
+assert.equal(/ApplicationV2\.prototype|Application\.prototype/.test(controllerSrc), false);
 
 console.log("NelTempo timing tests passed.");

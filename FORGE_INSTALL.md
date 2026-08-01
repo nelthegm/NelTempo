@@ -8,7 +8,7 @@ Use the ZIP labeled **Forge upload** (`dynamic-initiative.zip`). Its `module.jso
 2. Open your Forge **Games Configuration** page.
 3. In **Table Tools**, choose **Summon Import Wizard**.
 4. Turn off **Install found packages from the Bazaar** so this remains a custom package.
-5. Upload `dynamic-initiative.zip` (or `nel-dynamic-initiative-v0.2.1-forge.zip` if you rename the release archive) and choose **Analyze**.
+5. Upload `dynamic-initiative.zip` (or `nel-dynamic-initiative-v0.2.2-forge.zip` if you rename the release archive) and choose **Analyze**.
 6. Complete the import, then open the world's **Manage Modules** menu.
 7. Disable **Combat Carousel**.
 8. Enable **NelTempo**. Keep **PF2e Workbench** enabled.

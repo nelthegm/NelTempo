@@ -16,8 +16,16 @@ body.ndi-suppress-native-tracker .combat-tracker {
   --ndi-bg: rgba(12, 10, 14, 0.94);
   --ndi-panel: rgba(28, 23, 30, 0.94);
   --ndi-muted: #b9b3bd;
+  /*
+   * Interface layer: above the canvas / scene HUD peers, below Foundry application
+   * windows. Foundry V14 ApplicationV1/V2 windows increment from --z-index-window
+   * (commonly ~100+) via _maxZ. A prior value of 110 competed with that range and
+   * covered Actor/Item/Journal sheets. Prefer Foundry's --z-index-app when present.
+   */
+  --ndi-interface-z: var(--z-index-app, 30);
   position: fixed;
-  z-index: 110;
+  z-index: var(--ndi-interface-z);
+  pointer-events: auto;
   left: 50%;
   top: 8px;
   transform: translateX(-50%);
@@ -422,7 +430,8 @@ body.ndi-suppress-native-tracker .combat-tracker {
 
 #ndi-launcher {
   position: fixed;
-  z-index: 109;
+  z-index: var(--ndi-interface-z, var(--z-index-app, 30));
+  pointer-events: auto;
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
@@ -438,7 +447,11 @@ body.ndi-suppress-native-tracker .combat-tracker {
 .ndi-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  /*
+   * Temporary initiative skill modal only. Persistent dock/launcher stay in the
+   * interface layer below Foundry windows; this modal behaves like DialogV2.
+   */
+  z-index: var(--z-index-tooltip, 9999);
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.58);
@@ -761,7 +774,7 @@ body.ndi-suppress-native-tracker .combat-tracker {
   }
 }
 
-/* Condition timing badges and priority presentation (Slice 0.2.1) */
+/* Condition timing badges and priority presentation (Slice 0.2.1 / 0.2.2) */
 .ndi-timing-badge {
   position: absolute;
   left: 4px;
@@ -778,6 +791,20 @@ body.ndi-suppress-native-tracker .combat-tracker {
   line-height: 1.15;
   text-align: center;
   pointer-events: none;
+}
+
+/* Compact priority/override badges only — Delay Blocked overlays are not rendered. */
+.ndi-timing-badge.is-priority-badge {
+  border-color: rgba(214, 166, 42, 0.85);
+}
+
+.ndi-timing-badge.is-waiting-badge {
+  border-color: rgba(185, 179, 189, 0.55);
+  color: #d4cfd8;
+}
+
+.ndi-timing-badge.is-override-badge {
+  border-color: rgba(52, 200, 193, 0.75);
 }
 
 .ndi-portrait.is-priority {

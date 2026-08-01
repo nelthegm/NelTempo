@@ -20,7 +20,7 @@ function read(rel) {
 const moduleJson = JSON.parse(read("module.json"));
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
-assert.equal(moduleJson.version, "0.2.1");
+assert.equal(moduleJson.version, "0.2.2");
 assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
 

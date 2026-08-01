@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Persistent dock/launcher now use Foundry’s interface-layer z-index (`--z-index-app`, fallback 30) so Actor, NPC, Item, Journal, DialogV2, and other application windows render above NelTempo.
+- Removed the large Delay Blocked portrait overlay; Delay remains disabled with tooltip / `aria-disabled` and authoritative rejection.
+- Preserved compact Must Act First, Waiting for Confused Turn, and GM override indicators.
+- Documentation: `docs/SLICE_0_2_2_UI_LAYERING.md`.
+
 ## 0.2.1
 
 - Rebranded display name to **NelTempo** (formerly Dynamic Initiative); module id `nel-dynamic-initiative` unchanged.

@@ -165,6 +165,27 @@ function timingBadgeLabel(key) {
   }
 }
 
+/**
+ * Portrait overlay badges for forced-order / override only.
+ * Delay-blocked reasons stay on the Delay control tooltip — they must not
+ * cover the portrait image.
+ */
+function isPortraitOverlayBadge(key) {
+  return (
+    key === "must-act-first" ||
+    key === "waiting-confused" ||
+    key === "gm-override" ||
+    key === "resume-allowed"
+  );
+}
+
+function portraitOverlayBadgeClass(key) {
+  if (key === "must-act-first") return "is-priority-badge";
+  if (key === "waiting-confused") return "is-waiting-badge";
+  if (key === "gm-override" || key === "resume-allowed") return "is-override-badge";
+  return "";
+}
+
 function delayTooltip(combatant, state) {
   const eligibility = delayEligibilityFor(combatant, state);
   if (eligibility.allowed) return t("NDI.Control.Delay");
@@ -186,8 +207,11 @@ function statusFor(combatant, state) {
   if (state.lifecycle?.status === LIFECYCLE_STATUS.ENDING) return t("NDI.Lifecycle.EndingPhase");
   if (isTurnFinished(state, combatant.id)) return t("NDI.Control.Ended");
   const badge = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
-  const badgeLabel = timingBadgeLabel(badge);
-  if (badgeLabel) return badgeLabel;
+  // Priority / override status only — Delay Blocked is conveyed by the Delay control.
+  if (isPortraitOverlayBadge(badge)) {
+    const badgeLabel = timingBadgeLabel(badge);
+    if (badgeLabel) return badgeLabel;
+  }
   if (state.activeCombatantId === combatant.id) return "Active turn";
   if (state.delayed?.[combatant.id]) return "Delayed to Rearguard";
   return "Ready";
@@ -243,9 +267,11 @@ function portraitHTML(combatant, state) {
     : "";
 
   const badgeKey = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
-  const badgeText = timingBadgeLabel(badgeKey);
+  const showOverlay = isPortraitOverlayBadge(badgeKey);
+  const badgeText = showOverlay ? timingBadgeLabel(badgeKey) : null;
+  const badgeClass = showOverlay ? portraitOverlayBadgeClass(badgeKey) : "";
   const timingBadge = badgeText
-    ? `<span class="ndi-timing-badge" title="${escapeHTML(badgeText)}">${escapeHTML(badgeText)}</span>`
+    ? `<span class="ndi-timing-badge ${badgeClass}" title="${escapeHTML(badgeText)}" aria-hidden="true">${escapeHTML(badgeText)}</span>`
     : "";
 
   let turnControls = "";
@@ -779,6 +805,15 @@ function bindDockEvents(root, combat, state) {
   skillSelect?.addEventListener("change", () => requestAction(REQUESTS.SET_SKILL, { skill: skillSelect.value }));
 }
 
+/**
+ * Persistent dock/launcher mount on document.body.
+ * Stacking is owned by CSS --ndi-interface-z (below Foundry --z-index-window).
+ * Do not set inline z-index or reorder Foundry application windows.
+ */
+function mountInterfaceElement(element) {
+  document.body.append(element);
+}
+
 function createLauncher() {
   if (!game.user.isGM) return;
   const existing = document.getElementById(LAUNCHER_ID);
@@ -791,7 +826,7 @@ function createLauncher() {
   button.type = "button";
   button.innerHTML = `<i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Title"))}`;
   button.addEventListener("click", () => requestAction(REQUESTS.START));
-  document.body.append(button);
+  mountInterfaceElement(button);
 }
 
 export function renderDock() {
@@ -816,8 +851,9 @@ export function renderDock() {
   root.style.setProperty("--ndi-portrait-size", `${currentPortraitSize()}px`);
   root.style.setProperty("--ndi-max-width", `${game.settings.get(MODULE_ID, SETTINGS.MAX_WIDTH)}vw`);
   root.style.top = `${game.settings.get(MODULE_ID, SETTINGS.VERTICAL_OFFSET)}px`;
+  // Never set an inline z-index — CSS interface-layer variable owns stacking.
   root.innerHTML = `${portraitStageHTML(combatants, state)}${bottomBarHTML(combat, state)}`;
-  document.body.append(root);
+  mountInterfaceElement(root);
   restoreDockPosition(root);
   enableDrag(root);
   bindDockEvents(root, combat, state);

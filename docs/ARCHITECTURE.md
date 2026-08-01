@@ -215,6 +215,10 @@ The condition adapter uses `hasCondition`, `conditions.hasType`, `getCondition`,
 
 Timing enforcement is gated by world setting **Enforce Condition Timing** (default true) and lifecycle status **Open**.
 
+## UI layering (0.2.2)
+
+Persistent dock/launcher use CSS `--ndi-interface-z: var(--z-index-app, 30)` so Foundry ApplicationV1/V2 windows (starting near `--z-index-window` / `_maxZ`) render above NelTempo. Delay Blocked is conveyed only by the disabled Delay control (tooltip / aria), not a portrait overlay. Priority badges remain. See `docs/SLICE_0_2_2_UI_LAYERING.md`.
+
 ## File map
 
 | File | Role |
@@ -231,3 +235,4 @@ Timing enforcement is gated by world setting **Enforce Condition Timing** (defau
 | `scripts/timing.js` | Pure condition-timing state (0.2.1) |
 | `scripts/timing-service.js` | Live timing reconciliation (0.2.1) |
 | `scripts/constants.js` | Module id, settings keys, request types |
+| `styles/dynamic-initiative.css` | Dock layout, interface-layer z-index, badges |
