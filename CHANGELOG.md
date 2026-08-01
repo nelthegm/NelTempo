@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.5
+
+- Replaced legacy Foundry `"-=key"` combat-flag deletion with atomic complete replacement of the module-owned state object using V14 `_replace` / `ForcedReplacement`.
+- Added cohesive state normalization that prunes stale combatant ids and keeps only plain serializable data.
+- Serialized combat state mutations through a per-combat queue to avoid overlapping writes from rapid UI clicks.
+- Added a lightweight `revision` counter incremented only on successful state writes.
+- Undo restores gameplay state after normalizing against combatants still in the encounter.
+- Moved **Dynamic Initiative Debug Logging** to a client-scoped setting (default off) with concise structured diagnostics.
+- Added architecture, maintenance, and test-plan documentation; expanded automated tests.
+
 ## 0.1.4
 
 - Replaced the opaque dock shell with a transparent portrait staging layout.

@@ -1,4 +1,13 @@
 import { FLAG_STATE, MODULE_ID, SETTINGS } from "./constants.js";
+import {
+  countPrunedCombatantEntries,
+  normalizeState,
+} from "./state.js";
+
+/** @type {Map<string, Promise<unknown>>} */
+const combatMutationChains = new Map();
+/** @type {Map<string, number>} */
+const combatMutationDepth = new Map();
 
 export function debug(...args) {
   try {
@@ -6,6 +15,25 @@ export function debug(...args) {
   } catch (_error) {
     // Settings may not be registered during very early initialization.
   }
+}
+
+/**
+ * Concise structured diagnostics. Only emits when debug logging is enabled.
+ * Never logs actor names, token names, full flags, or secrets.
+ */
+export function diag(event, details = {}) {
+  try {
+    if (!game.settings.get(MODULE_ID, SETTINGS.DEBUG)) return;
+  } catch (_error) {
+    return;
+  }
+  const safe = {};
+  for (const [key, value] of Object.entries(details ?? {})) {
+    if (value === undefined) continue;
+    if (["actorName", "tokenName", "flags", "source", "secrets", "name"].includes(key)) continue;
+    safe[key] = value;
+  }
+  console.debug(`${MODULE_ID} | ${event}`, safe);
 }
 
 export function notify(level, message) {
@@ -21,6 +49,44 @@ export function getState(combat = getCombat()) {
   return combat?.getFlag(MODULE_ID, FLAG_STATE) ?? null;
 }
 
+export function shortId(id) {
+  const text = String(id ?? "");
+  return text.length <= 8 ? text : text.slice(0, 8);
+}
+
+export function combatantIdList(combat) {
+  if (!combat?.combatants) return [];
+  return [...combat.combatants].map((combatant) => combatant.id).filter(Boolean);
+}
+
+/**
+ * Serialize mutations for a combat so rapid UI clicks cannot overlap writes.
+ * Re-entrant: nested calls for the same combat run inline (no deadlock with saveState).
+ */
+export function runCombatMutation(combatId, task) {
+  const key = String(combatId ?? "__none__");
+  const depth = combatMutationDepth.get(key) ?? 0;
+  if (depth > 0) return Promise.resolve().then(task);
+
+  const previous = combatMutationChains.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(async () => {
+    combatMutationDepth.set(key, (combatMutationDepth.get(key) ?? 0) + 1);
+    try {
+      return await task();
+    } finally {
+      const nextDepth = (combatMutationDepth.get(key) ?? 1) - 1;
+      if (nextDepth <= 0) combatMutationDepth.delete(key);
+      else combatMutationDepth.set(key, nextDepth);
+    }
+  });
+
+  const tracked = run.catch(() => undefined).finally(() => {
+    if (combatMutationChains.get(key) === tracked) combatMutationChains.delete(key);
+  });
+  combatMutationChains.set(key, tracked);
+  return run;
+}
+
 let warnedMonksCombatDetails = false;
 
 function isMonksCombatDetailsRenderError(error) {
@@ -29,18 +95,77 @@ function isMonksCombatDetailsRenderError(error) {
 }
 
 /**
+ * Wrap a complete module-owned state object so Foundry V14 replaces it atomically.
+ * Prefer the global `_replace` operator; fall back to foundry.data.operators.
+ * Without Foundry (unit tests), returns the plain object for direct assignment.
+ */
+export function applyForceReplace(value) {
+  if (typeof globalThis._replace === "function") return globalThis._replace(value);
+
+  const operators = globalThis.foundry?.data?.operators;
+  if (operators) {
+    if (typeof operators._replace === "function") return operators._replace(value);
+    if (typeof operators.ForcedReplacement === "function") {
+      try {
+        const wrapped = operators.ForcedReplacement(value);
+        if (wrapped !== undefined) return wrapped;
+      } catch (_error) {
+        // Try as a constructable class next.
+      }
+      try {
+        return new operators.ForcedReplacement(value);
+      } catch (_error) {
+        // Fall through to plain value.
+      }
+    }
+  }
+
+  return value;
+}
+
+/**
+ * Build a combat update that replaces only this module's state flag.
+ * Does not touch other modules' flags or core combat fields.
+ */
+export function buildCompleteStateUpdate(state) {
+  return {
+    [`flags.${MODULE_ID}.${FLAG_STATE}`]: applyForceReplace(state),
+  };
+}
+
+/**
  * Update the Combat document without asking Foundry to render the native
  * tracker. Dynamic Initiative owns its own dock, and suppressing the unused
  * tracker avoids third-party tracker hooks interrupting phase changes.
+ *
+ * @returns {Promise<{ok: boolean, combatId: string|null, revision: number|null, reason: string|null, error: Error|null, document?: object|null}>}
  */
 export async function safeCombatUpdate(combat, changes, options = {}) {
-  if (!combat) throw new Error("No active combat encounter.");
+  if (!combat) {
+    return {
+      ok: false,
+      combatId: null,
+      revision: null,
+      reason: "no-combat",
+      error: new Error("No active combat encounter."),
+    };
+  }
+
+  const combatId = combat.id ?? null;
   try {
-    return await combat.update(changes, {
+    const document = await combat.update(changes, {
       ...options,
       render: false,
       [`${MODULE_ID}.internal`]: true,
     });
+    return {
+      ok: true,
+      combatId,
+      revision: null,
+      reason: null,
+      error: null,
+      document: document ?? combat,
+    };
   } catch (error) {
     // Monk's Combat Details 14.02 can throw from its post-render hook on PF2e
     // because CONFIG.statusEffects is not the Array shape it assumes. The
@@ -54,61 +179,185 @@ export async function safeCombatUpdate(combat, changes, options = {}) {
           error,
         );
       }
-      return combat;
+      return {
+        ok: true,
+        combatId,
+        revision: null,
+        reason: "external-tracker-hook",
+        error: null,
+        document: combat,
+      };
     }
-    throw error;
-  }
-}
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function sameValue(left, right) {
-  if (Object.is(left, right)) return true;
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch (_error) {
-    return false;
+    console.error(`${MODULE_ID} | combat update failed`, {
+      combatId: shortId(combatId),
+      reason: error?.message ?? "update-failed",
+    });
+    return {
+      ok: false,
+      combatId,
+      revision: null,
+      reason: "update-failed",
+      error,
+      document: null,
+    };
   }
 }
 
 /**
- * Build a Foundry differential update which truly replaces nested state maps.
- * Document updates merge objects, so assigning results: {} alone does not
- * remove old combatant result keys. Foundry's -= deletion syntax is required.
+ * Persist a complete normalized Dynamic Initiative state by replacing the
+ * module-owned combat flag atomically. Increments revision once on success.
+ *
+ * @returns {Promise<{ok: boolean, combatId: string|null, revision: number|null, reason: string|null, error: Error|null}>}
  */
-export function buildStateUpdate(basePath, previous, next) {
-  if (!isPlainObject(previous)) return { [basePath]: next };
-  const changes = {};
+export async function saveState(combat, state, { reason = "state-save" } = {}) {
+  if (!combat?.id) {
+    return {
+      ok: false,
+      combatId: null,
+      revision: null,
+      reason: "no-combat",
+      error: new Error("No active combat encounter."),
+    };
+  }
 
-  const walk = (path, before, after) => {
-    if (sameValue(before, after)) return;
-    if (!isPlainObject(after) || !isPlainObject(before)) {
-      changes[path] = after;
-      return;
+  return runCombatMutation(combat.id, async () => {
+    const live = game.combats?.get?.(combat.id) ?? combat;
+    if (!live || live.id !== combat.id) {
+      diag("state-update-failed", {
+        combatId: shortId(combat.id),
+        reason: "combat-missing",
+      });
+      return {
+        ok: false,
+        combatId: combat.id,
+        revision: null,
+        reason: "combat-missing",
+        error: new Error("The combat encounter no longer exists."),
+      };
     }
 
-    for (const key of Object.keys(before)) {
-      if (!Object.hasOwn(after, key)) changes[`${path}.-=${key}`] = null;
+    if (!game.user?.isGM) {
+      diag("state-update-failed", {
+        combatId: shortId(live.id),
+        reason: "not-gm",
+        userId: shortId(game.user?.id),
+      });
+      return {
+        ok: false,
+        combatId: live.id,
+        revision: null,
+        reason: "not-gm",
+        error: new Error("Only a GM can update Dynamic Initiative combat state."),
+      };
     }
-    for (const [key, value] of Object.entries(after)) {
-      const childPath = `${path}.${key}`;
-      if (!Object.hasOwn(before, key)) changes[childPath] = value;
-      else walk(childPath, before[key], value);
+
+    const previous = getState(live);
+    const previousRevision = Math.max(0, Number(previous?.revision ?? 0) || 0);
+    const combatantIds = combatantIdList(live);
+
+    let normalized;
+    try {
+      normalized = normalizeState(state, { combatantIds, includeHistory: true });
+    } catch (error) {
+      diag("state-update-failed", {
+        combatId: shortId(live.id),
+        reason: "normalize-failed",
+      });
+      console.error(`${MODULE_ID} | state normalization failed`, {
+        combatId: shortId(live.id),
+        reason: error?.message ?? "normalize-failed",
+      });
+      return {
+        ok: false,
+        combatId: live.id,
+        revision: previousRevision,
+        reason: "normalize-failed",
+        error,
+      };
     }
-  };
 
-  walk(basePath, previous, next);
-  return changes;
-}
+    const pruned = countPrunedCombatantEntries(state, normalized);
+    normalized.revision = previousRevision + 1;
 
-export async function saveState(combat, state) {
-  const basePath = `flags.${MODULE_ID}.${FLAG_STATE}`;
-  const previous = getState(combat);
-  const changes = buildStateUpdate(basePath, previous, state);
-  if (Object.keys(changes).length) await safeCombatUpdate(combat, changes);
-  return state;
+    diag("state-normalized", {
+      combatId: shortId(live.id),
+      phase: normalized.phase,
+      revision: normalized.revision,
+      combatants: combatantIds.length,
+      pruned,
+      reason,
+    });
+
+    if (pruned > 0) {
+      diag("combatant-state-pruned", {
+        combatId: shortId(live.id),
+        pruned,
+        combatants: combatantIds.length,
+        revision: normalized.revision,
+      });
+    }
+
+    diag("state-update-queued", {
+      combatId: shortId(live.id),
+      phase: normalized.phase,
+      revision: normalized.revision,
+      reason,
+    });
+
+    diag("state-update-started", {
+      combatId: shortId(live.id),
+      phase: normalized.phase,
+      revision: normalized.revision,
+      reason,
+    });
+
+    const changes = buildCompleteStateUpdate(normalized);
+    const updateResult = await safeCombatUpdate(live, changes);
+    if (!updateResult.ok) {
+      diag("state-update-failed", {
+        combatId: shortId(live.id),
+        phase: normalized.phase,
+        revision: previousRevision,
+        reason: updateResult.reason,
+      });
+      return {
+        ok: false,
+        combatId: live.id,
+        revision: previousRevision,
+        reason: updateResult.reason,
+        error: updateResult.error,
+      };
+    }
+
+    const stored = getState(live);
+    const storedRevision = Number(stored?.revision ?? NaN);
+    if (Number.isFinite(storedRevision) && storedRevision !== normalized.revision) {
+      // Another writer may have interleaved outside our queue; report mismatch.
+      diag("state-update-stale", {
+        combatId: shortId(live.id),
+        revision: storedRevision,
+        expected: normalized.revision,
+      });
+    }
+
+    diag("state-update-complete", {
+      combatId: shortId(live.id),
+      phase: normalized.phase,
+      revision: normalized.revision,
+      combatants: combatantIds.length,
+      pruned,
+      reason,
+    });
+
+    return {
+      ok: true,
+      combatId: live.id,
+      revision: normalized.revision,
+      reason: null,
+      error: null,
+    };
+  });
 }
 
 /** Clear native initiative values for party combatants at each new round. */
@@ -274,10 +523,12 @@ export async function setNativeTurn(combat, combatantId) {
   const turns = combat.turns ?? [];
   const index = turns.findIndex((combatant) => combatant.id === combatantId);
   if (index < 0) return;
-  await safeCombatUpdate(combat, { turn: index });
+  const result = await safeCombatUpdate(combat, { turn: index });
+  if (!result.ok && result.error) throw result.error;
 }
 
 export async function clearNativeTurn(combat) {
   if (!combat || combat.turn == null) return;
-  await safeCombatUpdate(combat, { turn: null });
+  const result = await safeCombatUpdate(combat, { turn: null });
+  if (!result.ok && result.error) throw result.error;
 }

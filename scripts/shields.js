@@ -1,6 +1,6 @@
 import { MODULE_ID, SETTINGS } from "./constants.js";
 import { PHASES } from "./state.js";
-import { debug, findCombatantForActor, getCombat, getState, isPrimaryGM, saveState } from "./utils.js";
+import { debug, findCombatantForActor, getCombat, getState, isPrimaryGM, runCombatMutation, saveState } from "./utils.js";
 
 function normalizedSlug(item) {
   return String(item?.slug ?? item?.system?.slug ?? item?.name ?? "")
@@ -48,18 +48,27 @@ export async function registerRaisedShield(item) {
     console.warn(`${MODULE_ID} | Unable to make Raise a Shield duration unlimited`, error);
   }
 
-  const next = foundry.utils.deepClone(state);
-  next.shields ??= {};
-  next.shields[item.uuid] = {
-    itemUuid: item.uuid,
-    actorUuid: item.actor?.uuid ?? null,
-    combatantId: combatant.id,
-    expireEnemySerial,
-    createdPhase: state.phase,
-    createdAt: Date.now(),
-  };
-  await saveState(combat, next);
-  debug("Registered raised shield", next.shields[item.uuid]);
+  await runCombatMutation(combat.id, async () => {
+    const liveState = getState(combat) ?? state;
+    const next = foundry.utils.deepClone(liveState);
+    next.shields ??= {};
+    next.shields[item.uuid] = {
+      itemUuid: item.uuid,
+      actorUuid: item.actor?.uuid ?? null,
+      combatantId: combatant.id,
+      expireEnemySerial,
+      createdPhase: liveState.phase,
+      createdAt: Date.now(),
+    };
+    const result = await saveState(combat, next, { reason: "register-shield" });
+    if (!result.ok) {
+      console.error(`${MODULE_ID} | Failed to persist Raise a Shield tracking`, {
+        reason: result.reason,
+      });
+      return;
+    }
+    debug("Registered raised shield", { combatantId: combatant.id, expireEnemySerial });
+  });
 }
 
 async function resolveItem(entry) {
@@ -128,6 +137,13 @@ export async function clearManagedRaisedShields(combat, state) {
   }
   const next = foundry.utils.deepClone(state ?? {});
   next.shields = {};
-  if (combat && state?.enabled) await saveState(combat, next);
+  if (combat && state?.enabled) {
+    const result = await saveState(combat, next, { reason: "clear-shields" });
+    if (!result.ok) {
+      console.error(`${MODULE_ID} | Failed to clear Raise a Shield tracking at combat end`, {
+        reason: result.reason,
+      });
+    }
+  }
   return next;
 }

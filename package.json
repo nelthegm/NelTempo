@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/state-machine.test.mjs"
+    "test": "node tests/state-machine.test.mjs && node tests/persistence.test.mjs && node tests/package-validate.test.mjs",
+    "pack": "node scripts/pack.mjs"
   }
 }

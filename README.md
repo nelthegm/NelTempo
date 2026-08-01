@@ -11,12 +11,16 @@ Dynamic Initiative replaces a fixed individual initiative order with four encoun
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
+**Current version:** 0.1.5  
+**Module ID:** `nel-dynamic-initiative`  
+**Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.3.0, Forge VTT hosting
+
 ## Installation
 
 ### Forge / manual module installation
 
-1. Extract the ZIP.
-2. Place the `nel-dynamic-initiative` folder in Foundry's `Data/modules` directory.
+1. Extract the ZIP (`dist/dynamic-initiative.zip` or the release archive).
+2. Place the extracted folder in Foundry's `Data/modules` directory so that `module.json` is at `Data/modules/<folder>/module.json`.
 3. Restart Foundry if it was running.
 4. Open **Manage Modules** for the world.
 5. Enable **Dynamic Initiative**.
@@ -57,6 +61,29 @@ game.dynamicInitiative.start();
 - Complete the full PF2e turn, then click **End Turn**.
 - A Vanguard character can use **Delay to Rearguard**.
 
+## Settings
+
+| Setting | Scope | Default | Description |
+| --- | --- | --- | --- |
+| Portrait Size | Client | 72 | Portrait height in the dock |
+| Top Offset | Client | 8 | Default distance from the top of the window |
+| Maximum Dock Width | Client | 62 | Max width as a percentage of the browser |
+| Automatically Open Initiative Prompts | Client | true | Auto-open skill prompts when the GM prompts |
+| Minimum Opposition for Raise a Shield | World | true | Manage Raise a Shield until end of next Enemy phase |
+| Dynamic Initiative Debug Logging | Client | false | Concise state diagnostics in the browser console |
+
+### Debug logging
+
+When **Dynamic Initiative Debug Logging** is enabled, the console receives short events such as:
+
+- `state-normalized`, `state-update-queued`, `state-update-started`, `state-update-complete`
+- `state-update-stale`, `state-update-failed`
+- `phase-change-requested`, `phase-change-complete`
+- `undo-requested`, `undo-complete`
+- `combatant-state-pruned`, `combat-ended-cleanup`
+
+Logged fields are limited to shortened combat ids, phase slugs, revision numbers, combatant counts, pruned-entry counts, and reasons. Actor names, token names, full flags, and secrets are never logged.
+
 ## Raise a Shield: minimum opposition
 
 While Dynamic Initiative is active, newly created **Raise a Shield** effects are changed to unlimited duration and tracked by the module. They are removed at the end of the next applicable Enemy phase.
@@ -81,13 +108,49 @@ The module uses native personal turns for:
 
 The shared Initiative phase is for global round transitions, environmental changes, hazard escalation, progress clocks, and the next initiative checks.
 
-## Current limitations in v0.1.4
+## Development setup
 
-- Dynamic Initiative does not judge whether a player's chosen initiative skill is narratively appropriate.
-- Opening initiative automation from every possible third-party module cannot be guaranteed.
-- Minimum-opposition shield timing recognizes PF2e effects whose slug or name matches **Raise a Shield**.
-- Friendly NPCs are classified as party-side if they have player ownership, party alliance, or friendly token disposition. Other NPCs are treated as enemies.
-- The module is designed to coexist with PF2e Workbench, but the first live-world test should be performed in a copied world or after a backup.
+```bash
+cd C:\Dev\FoundryModules\DynamicInitiative
+npm test
+npm run pack
+```
+
+- Runtime entry: `scripts/main.js`
+- State machine: `scripts/state.js`
+- Persistence: `scripts/utils.js` (`saveState`, `safeCombatUpdate`)
+- GM/player requests: `scripts/controller.js`
+- Portrait dock UI: `scripts/ui.js`
+
+## Package creation
+
+```bash
+npm run pack
+```
+
+Creates `dist/dynamic-initiative.zip` with `module.json` at the ZIP root, runtime scripts, styles, localization, README, and LICENSE. Excludes `.git`, `node_modules`, `tests`, and `dist` contents other than the archive itself.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Forced-deletion compatibility warnings | Should be gone in 0.1.5+. Confirm the loaded module version is 0.1.5 and hard-refresh clients. |
+| Phase change does nothing | Only the primary active GM applies state mutations. Confirm a GM is active. |
+| Initiative prompt missing on a player | Ensure the player owns the combatant and **Automatically Open Initiative Prompts** is on. |
+| Stale combatant results after removal | 0.1.5 replaces the full module state object each write and prunes missing combatant ids. |
+| Undo after removing a combatant | Undo restores gameplay fields but does not recreate deleted combatants. |
+
+## Known third-party noise (not Dynamic Initiative)
+
+Unrelated console errors observed during playtests should not be treated as Dynamic Initiative failures:
+
+- Monk’s Combat Details — `CONFIG.statusEffects.find is not a function`
+- Pathfinder 2e Action Macros — actor-sheet render errors
+- Magnetic Shot / other item alterations — invalid alteration rules
+- PF2e Sustain Reminder — deprecated `renderTemplate` usage
+- ForgeVTT host scripts — `setProperty is not defined` in some host contexts
+
+Dynamic Initiative fails independently and logs its own concise errors.
 
 ## GM macro API
 
@@ -102,22 +165,20 @@ game.dynamicInitiative.undo();
 game.dynamicInitiative.end();
 ```
 
-## Recommended first test
+## Documentation
 
-Use a copied world and a small encounter containing:
+- `docs/ARCHITECTURE.md` — state ownership, normalization, persistence
+- `docs/MAINTENANCE_V14_STATE_REPAIR.md` — V14 repair notes
+- `docs/TEST_PLAN.md` — static, mocked, and runtime test plan
+- `FORGE_INSTALL.md` — Forge and manual installation notes
+- `PLAYTEST_CHECKLIST.md` — focused first-session validation checklist
+- `CHANGELOG.md` — release history
 
-- Two PCs
-- Two ordinary enemies
-- One PC with a shield
-- One PC with a reaction
+## Current limitations in v0.1.5
 
-Test initial initiative, skill changes, free player order, Delay to Rearguard, Enemy phase reactions, Raise a Shield expiration, rerolling initiative, a Rearguard-to-Vanguard consecutive turn, Undo, and ending combat.
-
-## Included documentation
-
-- `FORGE_INSTALL.md` — Forge and manual installation notes.
-- `PLAYTEST_CHECKLIST.md` — focused first-session validation checklist.
-## Compatibility note: Monk's Combat Details
-
-Dynamic Initiative v0.1.4 suppresses native Combat Tracker rendering for its internal phase, round, turn, and flag updates. This prevents a known Monk's Combat Details 14.02 tracker-hook exception from interrupting round transitions and Initiative prompts. Monk's Combat Details can remain enabled, although its unrelated features may still produce its own console warning when another action renders the native tracker.
-
+- Dynamic Initiative does not judge whether a player's chosen initiative skill is narratively appropriate.
+- Opening initiative automation from every possible third-party module cannot be guaranteed.
+- Minimum-opposition shield timing recognizes PF2e effects whose slug or name matches **Raise a Shield**.
+- Friendly NPCs are classified as party-side if they have player ownership, party alliance, or friendly token disposition. Other NPCs are treated as enemies.
+- The module is designed to coexist with PF2e Workbench, but the first live-world test should be performed in a copied world or after a backup.
+- This maintenance release intentionally does **not** add phase-lifecycle automation, automatic phase advancement, Grabbed/Restrained/Confused timing, or new initiative rules.

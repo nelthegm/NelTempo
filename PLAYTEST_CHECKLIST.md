@@ -1,4 +1,4 @@
-# Dynamic Initiative v0.1.4 — First Playtest Checklist
+# Dynamic Initiative v0.1.5 — First Playtest Checklist
 
 Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 

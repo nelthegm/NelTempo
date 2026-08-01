@@ -12,6 +12,11 @@ export const PHASE_ORDER = Object.freeze([
   PHASES.REARGUARD,
 ]);
 
+/** Map keys whose entries are keyed by combatant id. */
+export const COMBATANT_STATE_MAPS = Object.freeze(["results", "acted", "delayed", "lastSkills"]);
+
+const SCHEMA_VERSION = 2;
+
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
   if (index < 0) throw new Error(`Unknown phase: ${phase}`);
@@ -20,7 +25,8 @@ export function nextPhase(phase) {
 
 export function createState({ round = 1, enemyDC = 10, suggestedSkill = "perception" } = {}) {
   return {
-    schema: 2,
+    schema: SCHEMA_VERSION,
+    revision: 0,
     enabled: true,
     phase: PHASES.INITIATIVE,
     round,
@@ -42,6 +48,181 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
 
 export function cloneState(state) {
   return structuredClone(state);
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSerializablePrimitive(value) {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+/**
+ * Recursively produce a plain JSON-serializable value.
+ * Drops functions, symbols, undefined, and non-plain class instances.
+ */
+export function toSerializable(value, depth = 0) {
+  if (depth > 32) return null;
+  if (value === undefined) return undefined;
+  if (isSerializablePrimitive(value)) {
+    if (typeof value === "number" && !Number.isFinite(value)) return null;
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => toSerializable(entry, depth + 1))
+      .filter((entry) => entry !== undefined);
+  }
+  if (!isPlainObject(value)) return undefined;
+
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== "string" || key.startsWith("-=") || key.startsWith("==")) continue;
+    const cleaned = toSerializable(entry, depth + 1);
+    if (cleaned !== undefined) out[key] = cleaned;
+  }
+  return out;
+}
+
+function sanitizeResult(result) {
+  if (!isPlainObject(result)) return null;
+  const totalRaw = result.total;
+  const total =
+    totalRaw === null || totalRaw === undefined
+      ? null
+      : Number.isFinite(Number(totalRaw))
+        ? Number(totalRaw)
+        : null;
+  const cleaned = {
+    total,
+    skill: result.skill == null ? null : String(result.skill),
+    label: result.label == null ? null : String(result.label),
+    phase: PHASE_ORDER.includes(result.phase) ? result.phase : PHASES.REARGUARD,
+    round: Math.max(1, Number(result.round ?? 1) || 1),
+    at: Number.isFinite(Number(result.at)) ? Number(result.at) : Date.now(),
+  };
+  if (result.forced) cleaned.forced = true;
+  return cleaned;
+}
+
+function sanitizeShieldEntry(entry) {
+  if (!isPlainObject(entry)) return null;
+  return toSerializable({
+    itemUuid: entry.itemUuid == null ? null : String(entry.itemUuid),
+    actorUuid: entry.actorUuid == null ? null : String(entry.actorUuid),
+    combatantId: entry.combatantId == null ? null : String(entry.combatantId),
+    expireEnemySerial: Math.max(0, Number(entry.expireEnemySerial || 0) || 0),
+    createdPhase: entry.createdPhase == null ? null : String(entry.createdPhase),
+    createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+    discoveredAtEnemyEnd: entry.discoveredAtEnemyEnd ? true : undefined,
+  });
+}
+
+/**
+ * Count combatant-map keys present in source but omitted from normalized output.
+ */
+export function countPrunedCombatantEntries(source, normalized) {
+  let removed = 0;
+  for (const key of COMBATANT_STATE_MAPS) {
+    const before = Object.keys(source?.[key] ?? {});
+    const after = new Set(Object.keys(normalized?.[key] ?? {}));
+    for (const id of before) {
+      if (!after.has(id)) removed += 1;
+    }
+  }
+  return removed;
+}
+
+/**
+ * Build a new plain, serializable Dynamic Initiative state object.
+ * Does not mutate the input. Optionally prunes combatant-keyed maps to
+ * the provided combatant id set (exact combatant document ids).
+ */
+export function normalizeState(state, { combatantIds = null, includeHistory = true } = {}) {
+  if (!isPlainObject(state)) {
+    throw new Error("Invalid Dynamic Initiative state.");
+  }
+
+  // Clone first so callers can keep their original reference unchanged.
+  const source = cloneState(state);
+  const idSet = combatantIds == null ? null : new Set([...combatantIds].map(String));
+
+  const phase = PHASE_ORDER.includes(source.phase) ? source.phase : PHASES.INITIATIVE;
+  const next = {
+    schema: Number(source.schema ?? SCHEMA_VERSION) || SCHEMA_VERSION,
+    revision: Math.max(0, Number(source.revision ?? 0) || 0),
+    enabled: Boolean(source.enabled),
+    phase,
+    round: Math.max(1, Number(source.round || 1) || 1),
+    enemyDC: Math.max(0, Math.min(99, Number(source.enemyDC ?? 10) || 0)),
+    suggestedSkill: String(source.suggestedSkill ?? "perception"),
+    promptId: source.promptId == null || source.promptId === "" ? null : String(source.promptId),
+    promptOpen: Boolean(source.promptOpen),
+    initialInitiativePending: Boolean(source.initialInitiativePending),
+    enemyPhaseSerial: Math.max(0, Number(source.enemyPhaseSerial || 0) || 0),
+    activeCombatantId:
+      source.activeCombatantId == null || source.activeCombatantId === ""
+        ? null
+        : String(source.activeCombatantId),
+    results: {},
+    acted: {},
+    delayed: {},
+    lastSkills: {},
+    shields: {},
+    history: [],
+  };
+
+  for (const [combatantId, result] of Object.entries(source.results ?? {})) {
+    if (idSet && !idSet.has(String(combatantId))) continue;
+    const cleaned = sanitizeResult(result);
+    if (cleaned) next.results[String(combatantId)] = cleaned;
+  }
+
+  for (const [combatantId, acted] of Object.entries(source.acted ?? {})) {
+    if (idSet && !idSet.has(String(combatantId))) continue;
+    if (acted) next.acted[String(combatantId)] = true;
+  }
+
+  for (const [combatantId, delayed] of Object.entries(source.delayed ?? {})) {
+    if (idSet && !idSet.has(String(combatantId))) continue;
+    if (delayed) next.delayed[String(combatantId)] = true;
+  }
+
+  for (const [combatantId, skill] of Object.entries(source.lastSkills ?? {})) {
+    if (idSet && !idSet.has(String(combatantId))) continue;
+    if (skill == null || skill === "") continue;
+    next.lastSkills[String(combatantId)] = String(skill);
+  }
+
+  if (idSet && next.activeCombatantId && !idSet.has(next.activeCombatantId)) {
+    next.activeCombatantId = null;
+  }
+
+  for (const [uuid, entry] of Object.entries(source.shields ?? {})) {
+    const cleaned = sanitizeShieldEntry(entry);
+    if (!cleaned) continue;
+    if (idSet && cleaned.combatantId && !idSet.has(String(cleaned.combatantId))) continue;
+    next.shields[String(uuid)] = cleaned;
+  }
+
+  if (includeHistory && Array.isArray(source.history)) {
+    next.history = source.history
+      .map((entry) => {
+        if (!isPlainObject(entry) || !isPlainObject(entry.state)) return null;
+        const snapshot = normalizeState(entry.state, { combatantIds, includeHistory: false });
+        snapshot.history = [];
+        return {
+          label: String(entry.label ?? "Undo"),
+          at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : Date.now(),
+          state: snapshot,
+        };
+      })
+      .filter(Boolean)
+      .slice(-12);
+  }
+
+  return toSerializable(next);
 }
 
 export function phaseForResult(total, dc) {
@@ -98,9 +279,17 @@ export function undoState(state) {
   return { state: restored, label: entry.label };
 }
 
+/**
+ * Restore an undo snapshot, then prune combatant keys that no longer exist.
+ * Does not invent results for newly added combatants.
+ */
+export function normalizeUndoRestore(state, combatantIds) {
+  return normalizeState(state, { combatantIds, includeHistory: true });
+}
+
 export function beginRoundTransition(state) {
   const next = withHistory(state, "Begin next round");
-  next.schema = 2;
+  next.schema = SCHEMA_VERSION;
   next.phase = PHASES.INITIATIVE;
   next.round = Math.max(1, Number(next.round || 1) + 1);
   next.promptId = null;
@@ -124,7 +313,7 @@ export function setPhase(state, phase) {
 
 export function submitResult(state, combatantId, { total, skill, label = skill }) {
   const next = withHistory(state, `Record initiative for ${combatantId}`);
-  next.schema = 2;
+  next.schema = SCHEMA_VERSION;
   next.results[combatantId] = {
     total: Number(total),
     skill,

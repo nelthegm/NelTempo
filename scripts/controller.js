@@ -5,6 +5,7 @@ import {
   createState,
   delayToRearguard,
   markActed,
+  normalizeUndoRestore,
   reclassifyResults,
   resultForCurrentRound,
   setPhase,
@@ -17,9 +18,11 @@ import { clearManagedRaisedShields, expireDueRaisedShields } from "./shields.js"
 import {
   activePlayerOwners,
   clearNativeTurn,
+  combatantIdList,
   combatantName,
   combatantSide,
   debug,
+  diag,
   getCombat,
   getCombatant,
   getState,
@@ -27,10 +30,12 @@ import {
   isUnavailable,
   isUnconscious,
   notify,
+  runCombatMutation,
   saveState,
   safeCombatUpdate,
   resetPartyNativeInitiative,
   setNativeTurn,
+  shortId,
   socketPayload,
   userCanOwnCombatant,
 } from "./utils.js";
@@ -45,6 +50,22 @@ function defaultEnemyDC(combat) {
     .map((combatant) => Number(combatant.actor?.initiative?.mod ?? combatant.actor?.system?.initiative?.totalModifier ?? NaN))
     .filter(Number.isFinite);
   return modifiers.length ? 10 + Math.max(...modifiers) : 10;
+}
+
+async function persistState(combat, state, reason) {
+  const result = await saveState(combat, state, { reason });
+  if (!result.ok) {
+    throw result.error ?? new Error(result.reason ?? "Failed to save Dynamic Initiative state.");
+  }
+  return result;
+}
+
+async function mustUpdateCombat(combat, changes) {
+  const result = await safeCombatUpdate(combat, changes);
+  if (!result.ok) {
+    throw result.error ?? new Error(result.reason ?? "Combat update failed.");
+  }
+  return result;
 }
 
 async function ensureCombat() {
@@ -73,9 +94,9 @@ async function ensureCombat() {
   // native turn boundary before the Initiative phase has finished.  Set the
   // encounter to round 1 with no active native turn instead.
   if (!combat.started || Number(combat.round || 0) < 1) {
-    await safeCombatUpdate(combat, { round: 1, turn: null });
+    await mustUpdateCombat(combat, { round: 1, turn: null });
   } else if (combat.turn != null) {
-    await safeCombatUpdate(combat, { turn: null });
+    await mustUpdateCombat(combat, { turn: null });
   }
   return combat;
 }
@@ -100,8 +121,8 @@ async function startDynamicInitiative() {
     enemyDC: defaultEnemyDC(combat),
     suggestedSkill: "last-used",
   });
-  await saveState(combat, state);
-  await safeCombatUpdate(combat, { round: state.round, turn: null });
+  await persistState(combat, state, "start");
+  await mustUpdateCombat(combat, { round: state.round, turn: null });
   await resetPartyNativeInitiative(combat);
   await publicChat(
     `<h3>Dynamic Initiative Started</h3><p>Set the Enemy Initiative DC, then prompt the players to roll.</p>`,
@@ -138,7 +159,7 @@ async function promptInitiative(combat, state) {
     }
   }
 
-  await saveState(combat, next);
+  await persistState(combat, next, "prompt-initiative");
   const prompt = {
     type: "show-initiative-prompt",
     combatId: combat.id,
@@ -169,7 +190,7 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
     skill: payload.skill,
     label: payload.label,
   });
-  await saveState(combat, next);
+  await persistState(combat, next, "submit-roll");
   // Dynamic Initiative keeps its initiative result in module state. The native
   // tracker is hidden and does not need a mirrored initiative update; avoiding
   // that update also prevents incompatible tracker modules from rendering.
@@ -188,7 +209,7 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
   if (complete) {
     notify("info", "All Dynamic Initiative checks are complete. The GM can begin Vanguard.");
     next.promptOpen = false;
-    await saveState(combat, next);
+    await persistState(combat, next, "prompt-complete");
   }
 }
 
@@ -198,18 +219,26 @@ async function changeDC(combat, state, payload) {
   let next = withHistory(state, `Change Enemy Initiative DC to ${value}`);
   next.enemyDC = value;
   next = reclassifyResults(next);
-  await saveState(combat, next);
+  await persistState(combat, next, "set-dc");
 }
 
 async function changeSuggestedSkill(combat, state, payload) {
   const next = withHistory(state, `Change suggested initiative skill to ${payload.skill}`);
   next.suggestedSkill = String(payload.skill || "last-used");
-  await saveState(combat, next);
+  await persistState(combat, next, "set-skill");
 }
 
 async function changePhase(combat, state, payload) {
   const target = payload.phase;
   if (target === state.phase) return;
+  diag("phase-change-requested", {
+    combatId: shortId(combat.id),
+    phase: state.phase,
+    target,
+    revision: Number(state.revision ?? 0),
+    combatants: combatantIdList(combat).length,
+  });
+
   let next = state;
 
   if (state.phase === PHASES.ENEMY && target !== PHASES.ENEMY) {
@@ -218,7 +247,7 @@ async function changePhase(combat, state, payload) {
 
   if (target === PHASES.INITIATIVE && state.phase !== PHASES.INITIATIVE) {
     next = beginRoundTransition(next);
-    await safeCombatUpdate(combat, { round: next.round, turn: null });
+    await mustUpdateCombat(combat, { round: next.round, turn: null });
     await resetPartyNativeInitiative(combat);
   } else {
     next = setPhase(next, target);
@@ -230,7 +259,13 @@ async function changePhase(combat, state, payload) {
     next.promptOpen = false;
   }
 
-  await saveState(combat, next);
+  const saved = await persistState(combat, next, "phase-change");
+  diag("phase-change-complete", {
+    combatId: shortId(combat.id),
+    phase: next.phase,
+    revision: saved.revision,
+    combatants: combatantIdList(combat).length,
+  });
   const label = target.charAt(0).toUpperCase() + target.slice(1);
   await publicChat(`<h3>Round ${next.round}: ${label} Phase</h3>`);
 }
@@ -256,7 +291,7 @@ async function claimTurn(combat, state, payload, requestUser) {
 
   const next = withHistory(state, `Activate ${combatantName(combatant)}`);
   next.activeCombatantId = combatant.id;
-  await saveState(combat, next);
+  await persistState(combat, next, "claim-turn");
   await setNativeTurn(combat, combatant.id);
 }
 
@@ -268,7 +303,7 @@ async function endTurn(combat, state, payload, requestUser) {
     throw new Error("You do not own the active combatant.");
   }
   const next = markActed(state, combatant.id, true);
-  await saveState(combat, next);
+  await persistState(combat, next, "end-turn");
   await clearNativeTurn(combat);
 }
 
@@ -280,7 +315,7 @@ async function delayCombatant(combat, state, payload, requestUser) {
     throw new Error("You do not own that combatant.");
   }
   const next = delayToRearguard(state, combatant.id);
-  await saveState(combat, next);
+  await persistState(combat, next, "delay-rearguard");
   await clearNativeTurn(combat);
 }
 
@@ -288,19 +323,37 @@ async function markCombatantActed(combat, state, payload) {
   const combatant = getCombatant(combat, payload.combatantId);
   if (!combatant) throw new Error("Invalid combatant.");
   const next = markActed(state, combatant.id, payload.acted !== false);
-  await saveState(combat, next);
+  await persistState(combat, next, "mark-acted");
   if (next.activeCombatantId == null) await clearNativeTurn(combat);
 }
 
 async function undo(combat, state) {
+  diag("undo-requested", {
+    combatId: shortId(combat.id),
+    phase: state.phase,
+    revision: Number(state.revision ?? 0),
+    combatants: combatantIdList(combat).length,
+  });
+
   const undone = undoState(state);
   if (!undone) {
     notify("info", "There is nothing to undo.");
     return;
   }
-  await saveState(combat, undone.state);
-  await safeCombatUpdate(combat, { round: undone.state.round, turn: null });
-  if (undone.state.activeCombatantId) await setNativeTurn(combat, undone.state.activeCombatantId);
+
+  // Normalize the restored snapshot against combatants still in the encounter.
+  // Deleted combatants are not recreated; a fresh revision is assigned on save.
+  const restored = normalizeUndoRestore(undone.state, combatantIdList(combat));
+  const saved = await persistState(combat, restored, "undo");
+  await mustUpdateCombat(combat, { round: restored.round, turn: null });
+  if (restored.activeCombatantId) await setNativeTurn(combat, restored.activeCombatantId);
+
+  diag("undo-complete", {
+    combatId: shortId(combat.id),
+    phase: restored.phase,
+    revision: saved.revision,
+    combatants: combatantIdList(combat).length,
+  });
   notify("info", `Undid: ${undone.label}`);
 }
 
@@ -311,57 +364,81 @@ async function endDynamicCombat(combat, state) {
   const cleaned = await clearManagedRaisedShields(combat, state);
   const next = foundry.utils.deepClone(cleaned ?? state);
   next.enabled = false;
-  await saveState(combat, next);
+  try {
+    await persistState(combat, next, "combat-end-cleanup");
+  } catch (error) {
+    // Combat may already be mid-delete; do not block encounter removal.
+    console.error(`${MODULE_ID} | combat end cleanup failed`, {
+      combatId: shortId(combat.id),
+      reason: error?.message ?? "cleanup-failed",
+    });
+  }
+  diag("combat-ended-cleanup", {
+    combatId: shortId(combat.id),
+    revision: Number(next.revision ?? 0),
+  });
   await combat.delete();
+}
+
+async function dispatchGMRequest(payload) {
+  const requestUser = validateRequestUser(payload);
+  if (payload.type === REQUESTS.START) return await startDynamicInitiative();
+
+  const combat = game.combats.get(payload.combatId) ?? getCombat();
+  const state = getState(combat);
+  if (!combat || !state?.enabled) throw new Error("Dynamic Initiative is not active.");
+
+  switch (payload.type) {
+    case REQUESTS.PROMPT:
+      return await promptInitiative(combat, state);
+    case REQUESTS.SUBMIT_ROLL:
+      return await submitInitiativeResult(combat, state, payload, requestUser);
+    case REQUESTS.SET_DC:
+      if (!requestUser.isGM) throw new Error("Only the GM can change the DC.");
+      return await changeDC(combat, state, payload);
+    case REQUESTS.SET_SKILL:
+      if (!requestUser.isGM) throw new Error("Only the GM can set the suggested skill.");
+      return await changeSuggestedSkill(combat, state, payload);
+    case REQUESTS.SET_PHASE:
+      if (!requestUser.isGM) throw new Error("Only the GM can change phases.");
+      return await changePhase(combat, state, payload);
+    case REQUESTS.CLAIM:
+      return await claimTurn(combat, state, payload, requestUser);
+    case REQUESTS.END_TURN:
+      return await endTurn(combat, state, payload, requestUser);
+    case REQUESTS.DELAY:
+    case REQUESTS.MOVE_REARGUARD:
+      return await delayCombatant(combat, state, payload, requestUser);
+    case REQUESTS.MARK_ACTED:
+      if (!requestUser.isGM) throw new Error("Only the GM can correct acted status.");
+      return await markCombatantActed(combat, state, payload);
+    case REQUESTS.UNDO:
+      if (!requestUser.isGM) throw new Error("Only the GM can undo.");
+      return await undo(combat, state);
+    case REQUESTS.END_COMBAT:
+      if (!requestUser.isGM) throw new Error("Only the GM can end combat.");
+      return await endDynamicCombat(combat, state);
+    default:
+      throw new Error(`Unknown Dynamic Initiative request: ${payload.type}`);
+  }
 }
 
 export async function handleGMRequest(payload) {
   if (!isPrimaryGM()) return;
-  try {
-    const requestUser = validateRequestUser(payload);
-    if (payload.type === REQUESTS.START) return await startDynamicInitiative();
 
-    const combat = game.combats.get(payload.combatId) ?? getCombat();
-    const state = getState(combat);
-    if (!combat || !state?.enabled) throw new Error("Dynamic Initiative is not active.");
-
-    switch (payload.type) {
-      case REQUESTS.PROMPT:
-        return await promptInitiative(combat, state);
-      case REQUESTS.SUBMIT_ROLL:
-        return await submitInitiativeResult(combat, state, payload, requestUser);
-      case REQUESTS.SET_DC:
-        if (!requestUser.isGM) throw new Error("Only the GM can change the DC.");
-        return await changeDC(combat, state, payload);
-      case REQUESTS.SET_SKILL:
-        if (!requestUser.isGM) throw new Error("Only the GM can set the suggested skill.");
-        return await changeSuggestedSkill(combat, state, payload);
-      case REQUESTS.SET_PHASE:
-        if (!requestUser.isGM) throw new Error("Only the GM can change phases.");
-        return await changePhase(combat, state, payload);
-      case REQUESTS.CLAIM:
-        return await claimTurn(combat, state, payload, requestUser);
-      case REQUESTS.END_TURN:
-        return await endTurn(combat, state, payload, requestUser);
-      case REQUESTS.DELAY:
-      case REQUESTS.MOVE_REARGUARD:
-        return await delayCombatant(combat, state, payload, requestUser);
-      case REQUESTS.MARK_ACTED:
-        if (!requestUser.isGM) throw new Error("Only the GM can correct acted status.");
-        return await markCombatantActed(combat, state, payload);
-      case REQUESTS.UNDO:
-        if (!requestUser.isGM) throw new Error("Only the GM can undo.");
-        return await undo(combat, state);
-      case REQUESTS.END_COMBAT:
-        if (!requestUser.isGM) throw new Error("Only the GM can end combat.");
-        return await endDynamicCombat(combat, state);
-      default:
-        throw new Error(`Unknown Dynamic Initiative request: ${payload.type}`);
+  const combatId = payload?.combatId ?? getCombat()?.id ?? "global";
+  return runCombatMutation(combatId, async () => {
+    try {
+      return await dispatchGMRequest(payload);
+    } catch (error) {
+      console.error(`${MODULE_ID} | Request failed`, {
+        type: payload?.type,
+        combatId: shortId(payload?.combatId),
+        reason: error?.message ?? "request-failed",
+      });
+      notify("error", error.message ?? "Dynamic Initiative request failed.");
     }
-  } catch (error) {
-    console.error(`${MODULE_ID} | Request failed`, payload, error);
-    notify("error", error.message ?? "Dynamic Initiative request failed.");
-  }
+  });
 }
 
 export async function requestAction(type, data = {}) {

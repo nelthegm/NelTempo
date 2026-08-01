@@ -58,13 +58,12 @@ function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, SETTINGS.DEBUG, {
-    name: "Debug Logging",
-    hint: "Write detailed Dynamic Initiative diagnostics to the browser console.",
-    scope: "world",
+    name: "Dynamic Initiative Debug Logging",
+    hint: "Write concise Dynamic Initiative state diagnostics to the browser console (combat id, phase, revision, counts). No actor or token names.",
+    scope: "client",
     config: true,
     type: Boolean,
     default: false,
-    restricted: true,
   });
 }
 
