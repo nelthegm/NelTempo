@@ -1,3 +1,5 @@
+import { normalizeLifecycle, interruptUncertainProcessing } from "./lifecycle.js";
+
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
   VANGUARD: "vanguard",
@@ -15,7 +17,7 @@ export const PHASE_ORDER = Object.freeze([
 /** Map keys whose entries are keyed by combatant id. */
 export const COMBATANT_STATE_MAPS = Object.freeze(["results", "acted", "delayed", "lastSkills"]);
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -42,6 +44,8 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     delayed: {},
     lastSkills: {},
     shields: {},
+    /** Active phase lifecycle record, or null during Initiative / idle. */
+    lifecycle: null,
     history: [],
   };
 }
@@ -150,7 +154,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
 
   const phase = PHASE_ORDER.includes(source.phase) ? source.phase : PHASES.INITIATIVE;
   const next = {
-    schema: Number(source.schema ?? SCHEMA_VERSION) || SCHEMA_VERSION,
+    schema: Math.max(SCHEMA_VERSION, Number(source.schema ?? SCHEMA_VERSION) || SCHEMA_VERSION),
     revision: Math.max(0, Number(source.revision ?? 0) || 0),
     enabled: Boolean(source.enabled),
     phase,
@@ -170,6 +174,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     delayed: {},
     lastSkills: {},
     shields: {},
+    lifecycle: null,
     history: [],
   };
 
@@ -204,6 +209,19 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     if (!cleaned) continue;
     if (idSet && cleaned.combatantId && !idSet.has(String(cleaned.combatantId))) continue;
     next.shields[String(uuid)] = cleaned;
+  }
+
+  // Lifecycle: normalize and prune roster against current combatants.
+  // Never invent a lifecycle for Initiative; preserve open/ending instances.
+  if (source.lifecycle != null) {
+    let lifecycle = normalizeLifecycle(source.lifecycle, { combatantIds: idSet });
+    // Convert uncertain Processing entries after reload when flag is set by caller.
+    if (lifecycle && source._interruptLifecycleProcessing) {
+      lifecycle = interruptUncertainProcessing(lifecycle);
+    }
+    next.lifecycle = lifecycle;
+  } else {
+    next.lifecycle = null;
   }
 
   if (includeHistory && Array.isArray(source.history)) {
@@ -299,6 +317,7 @@ export function beginRoundTransition(state) {
   next.results = {};
   next.acted = {};
   next.delayed = {};
+  next.lifecycle = null;
   return next;
 }
 
@@ -308,6 +327,9 @@ export function setPhase(state, phase) {
   next.phase = phase;
   next.activeCombatantId = null;
   if (phase === PHASES.ENEMY) next.enemyPhaseSerial = Number(next.enemyPhaseSerial || 0) + 1;
+  // Lifecycle is attached by the controller transition transaction.
+  // Clear when entering Initiative so stale instances cannot linger.
+  if (phase === PHASES.INITIATIVE) next.lifecycle = null;
   return next;
 }
 

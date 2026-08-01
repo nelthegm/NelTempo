@@ -16,6 +16,8 @@ for (const file of [
   "scripts/initiative.js",
   "scripts/shields.js",
   "scripts/constants.js",
+  "scripts/lifecycle.js",
+  "scripts/pf2e-lifecycle-adapter.js",
 ]) {
   execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" });
 }

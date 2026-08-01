@@ -1,4 +1,4 @@
-# Dynamic Initiative v0.1.5 — First Playtest Checklist
+# Dynamic Initiative v0.2.0 — Playtest Checklist
 
 Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
@@ -28,17 +28,21 @@ Use a copied world or make a world backup before the first test. Disable Combat 
 ## Vanguard
 
 - [ ] Click **Next Phase** to advance to Vanguard.
+- [ ] Confirm start-of-turn processing runs once (effects / reaction refresh) for Vanguard roster.
 - [ ] Confirm only Vanguard portraits are displayed.
 - [ ] Confirm either eligible player can claim the next turn.
 - [ ] Confirm another player cannot claim while a turn is active.
-- [ ] End the active turn and confirm its portrait dims.
+- [ ] Click **End Turn** on a portrait (not only the bottom bar); confirm Ended state and no persistent damage yet.
+- [ ] Reopen Turn, then End Turn again.
+- [ ] Confirm phase progress `Ended X / Y` and **Phase Complete** when all finished.
 - [ ] Delay one Vanguard character and confirm it moves to Rearguard.
 
 ## Enemy
 
-- [ ] Click **Next Phase** to advance to Enemy.
-- [ ] Confirm enemy portraits replace player portraits.
-- [ ] Confirm only the GM can activate enemies.
+- [ ] Click **Advance Phase** / **Next Phase** to leave Vanguard.
+- [ ] Confirm Vanguard end-of-turn processing (including any persistent damage) runs once at the boundary.
+- [ ] Confirm Enemy start-of-turn runs once; enemy portraits replace player portraits.
+- [ ] Confirm only the GM can activate enemies and End Turn for them.
 - [ ] Confirm the reaction reminder is visible.
 - [ ] Trigger Shield Block, Reactive Strike, or another reaction and confirm PF2e resolves it normally.
 

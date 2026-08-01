@@ -10,6 +10,14 @@ export const SETTINGS = Object.freeze({
   AUTO_OPEN_PROMPTS: "autoOpenPrompts",
   MANAGE_RAISED_SHIELD: "manageRaisedShield",
   DEBUG: "debugLogging",
+  /** off | prompt | automatic — advance when all roster turns end */
+  AUTO_ADVANCE_PHASE: "autoAdvancePhase",
+});
+
+export const AUTO_ADVANCE = Object.freeze({
+  OFF: "off",
+  PROMPT: "prompt",
+  AUTOMATIC: "automatic",
 });
 
 export const REQUESTS = Object.freeze({
@@ -21,6 +29,13 @@ export const REQUESTS = Object.freeze({
   SET_PHASE: "set-phase",
   CLAIM: "claim",
   END_TURN: "end-turn",
+  REOPEN_TURN: "reopen-turn",
+  END_REMAINING: "end-remaining",
+  FORCE_ADVANCE: "force-advance",
+  RETRY_FAILED_START: "retry-failed-start",
+  SKIP_FAILED_START: "skip-failed-start",
+  RETRY_FAILED_END: "retry-failed-end",
+  SKIP_FAILED_END: "skip-failed-end",
   DELAY: "delay",
   MOVE_REARGUARD: "move-rearguard",
   MARK_ACTED: "mark-acted",

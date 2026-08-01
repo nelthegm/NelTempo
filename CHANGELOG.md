@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Added formal phase lifecycle for Vanguard, Enemy, and Rearguard with durable `lifecycle` state (schema 3).
+- Native PF2e start-of-turn processing runs once per roster combatant when a phase opens (`CombatantPF2e.onStartTurn` via lifecycle adapter).
+- Native PF2e end-of-turn processing (including persistent damage) runs once when leaving a phase (`onEndTurn`).
+- **End Turn** on carousel portraits marks completion only; **Reopen Turn** is available before phase end.
+- Phase progress UI (`Ended X / Y`, Phase Complete) and GM controls: End Remaining Turns, Advance Phase, Force Advance, lifecycle recovery.
+- World setting **Advance Completed Phases Automatically** (`off` | `prompt` | `automatic`, default off).
+- Reload-safe interrupted recovery; multi-GM authority unchanged; Undo warns when crossing completed phase-end boundaries (state only).
+- `combat.turn` updates suppress native turn events so lifecycle is not duplicated.
+
 ## 0.1.5
 
 - Replaced legacy Foundry `"-=key"` combat-flag deletion with atomic complete replacement of the module-owned state object using V14 `_replace` / `ForcedReplacement`.

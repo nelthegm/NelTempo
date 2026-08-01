@@ -20,7 +20,7 @@ function read(rel) {
 const moduleJson = JSON.parse(read("module.json"));
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "Dynamic Initiative");
-assert.equal(moduleJson.version, "0.1.5");
+assert.equal(moduleJson.version, "0.2.0");
 assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
 
@@ -34,6 +34,8 @@ for (const file of [
   "scripts/initiative.js",
   "scripts/shields.js",
   "scripts/constants.js",
+  "scripts/lifecycle.js",
+  "scripts/pf2e-lifecycle-adapter.js",
   "styles/dynamic-initiative.css",
   "lang/en.json",
   "LICENSE",

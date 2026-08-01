@@ -11,7 +11,7 @@ Dynamic Initiative replaces a fixed individual initiative order with four encoun
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.1.5  
+**Current version:** 0.2.0  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.3.0, Forge VTT hosting
 
@@ -57,9 +57,20 @@ game.dynamicInitiative.start();
 ## Player workflow
 
 - During Initiative, choose an available skill or Lore in the prompt, then roll through PF2e's normal modifier dialog.
-- During Vanguard or Rearguard, click your portrait to claim the next turn.
-- Complete the full PF2e turn, then click **End Turn**.
+- During Vanguard or Rearguard, click your portrait to claim the next turn (optional highlight).
+- Complete your actions in any order, then click **End Turn** on your portrait.
+- **End Turn** only marks you finished for the phase; PF2e end-of-turn effects (including persistent damage) resolve when the whole phase ends.
+- Before the phase ends, you can **Reopen Turn** if you need to act again.
 - A Vanguard character can use **Delay to Rearguard**.
+
+## Phase lifecycle (0.2.0)
+
+When the GM advances into Vanguard, Enemy, or Rearguard:
+
+1. The module snapshots the phase roster and runs native PF2e **start-of-turn** once per combatant.
+2. Players act freely; each uses **End Turn** when done.
+3. When everyone is finished, the dock shows **Phase Complete**.
+4. The GM advances (or uses automatic advance). The module runs native PF2e **end-of-turn** once per combatant, then opens the next phase.
 
 ## Settings
 
@@ -70,6 +81,7 @@ game.dynamicInitiative.start();
 | Maximum Dock Width | Client | 62 | Max width as a percentage of the browser |
 | Automatically Open Initiative Prompts | Client | true | Auto-open skill prompts when the GM prompts |
 | Minimum Opposition for Raise a Shield | World | true | Manage Raise a Shield until end of next Enemy phase |
+| Advance Completed Phases Automatically | World | Off | Off / Prompt GM / Automatic when all turns end |
 | Dynamic Initiative Debug Logging | Client | false | Concise state diagnostics in the browser console |
 
 ### Debug logging

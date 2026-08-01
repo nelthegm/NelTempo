@@ -518,17 +518,22 @@ export function socketPayload(type, data = {}) {
   return { type, userId: game.user.id, sentAt: Date.now(), ...data };
 }
 
+/**
+ * Optionally sync the native combat turn marker for UI/third-party tools.
+ * Always suppress Foundry/PF2e turnEvents — Dynamic Initiative owns start/end
+ * boundaries via the phase lifecycle adapter, not combat.turn changes.
+ */
 export async function setNativeTurn(combat, combatantId) {
   if (!combat) return;
   const turns = combat.turns ?? [];
   const index = turns.findIndex((combatant) => combatant.id === combatantId);
   if (index < 0) return;
-  const result = await safeCombatUpdate(combat, { turn: index });
+  const result = await safeCombatUpdate(combat, { turn: index }, { turnEvents: false });
   if (!result.ok && result.error) throw result.error;
 }
 
 export async function clearNativeTurn(combat) {
   if (!combat || combat.turn == null) return;
-  const result = await safeCombatUpdate(combat, { turn: null });
+  const result = await safeCombatUpdate(combat, { turn: null }, { turnEvents: false });
   if (!result.ok && result.error) throw result.error;
 }

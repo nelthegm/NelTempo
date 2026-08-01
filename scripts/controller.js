@@ -1,4 +1,4 @@
-import { MODULE_ID, REQUESTS, SOCKET_NAME } from "./constants.js";
+import { AUTO_ADVANCE, MODULE_ID, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
 import {
   PHASES,
   beginRoundTransition,
@@ -8,12 +8,38 @@ import {
   normalizeUndoRestore,
   reclassifyResults,
   resultForCurrentRound,
-  setPhase,
   submitResult,
   undoState,
   withHistory,
   combatantPhase,
 } from "./state.js";
+import {
+  BOUNDARY_STATUS,
+  LIFECYCLE_STATUS,
+  beginEndBoundary,
+  beginStartBoundary,
+  buildRosterIds,
+  canEndTurn,
+  canReopenTurn,
+  completeEndBoundary,
+  completeStartBoundary,
+  createLifecycle,
+  endCandidates,
+  isLifecyclePhase,
+  lifecycleProgress,
+  markCombatantEndProcessing,
+  markCombatantEndResult,
+  markCombatantStartProcessing,
+  markCombatantStartResult,
+  markTurnEnded,
+  reopenTurn,
+  skipFailedEnds,
+  skipFailedStarts,
+  skipRemainingTurns,
+  startCandidates,
+  undoCrossesPhaseEnd,
+} from "./lifecycle.js";
+import { adapterReasonMessage, processEndTurn, processStartTurn } from "./pf2e-lifecycle-adapter.js";
 import { clearManagedRaisedShields, expireDueRaisedShields } from "./shields.js";
 import {
   activePlayerOwners,
@@ -39,6 +65,11 @@ import {
   socketPayload,
   userCanOwnCombatant,
 } from "./utils.js";
+
+/** In-flight phase transition promises keyed by combat id (join, do not double-run). */
+const phaseTransitionLocks = new Map();
+/** Guard automatic-advance prompts so multi-GM does not spam. */
+const autoAdvancePrompted = new Set();
 
 function publicChat(content) {
   return ChatMessage.create({ content, speaker: { alias: "Dynamic Initiative" } });
@@ -73,7 +104,7 @@ async function ensureCombat() {
   if (!combat) {
     const controlled = canvas?.tokens?.controlled ?? [];
     if (!controlled.length) {
-      notify("warn", "Select the tokens that belong in the encounter, then start Dynamic Initiative again.");
+      notify("warn", game.i18n.localize("NDI.Notify.SelectTokens"));
       return null;
     }
     const CombatClass = CONFIG.Combat.documentClass;
@@ -103,16 +134,373 @@ async function ensureCombat() {
 
 function validateRequestUser(payload) {
   const user = game.users.get(payload.userId);
-  if (!user?.active) throw new Error("The requesting user is not active.");
+  if (!user?.active) throw new Error(game.i18n.localize("NDI.Error.UserInactive"));
   return user;
 }
+
+function localize(key, data) {
+  try {
+    return data ? game.i18n.format(key, data) : game.i18n.localize(key);
+  } catch (_error) {
+    return key;
+  }
+}
+
+/**
+ * Build deterministic roster descriptors from the live encounter.
+ * Ordering: higher initiative total first, then combatant id.
+ */
+function rosterDescriptors(combat, state) {
+  return [...combat.combatants]
+    .filter((combatant) => combatant?.id && !isUnavailable(combatant))
+    .map((combatant) => {
+      const side = combatantSide(combatant);
+      const result = resultForCurrentRound(state, combatant.id);
+      return {
+        id: combatant.id,
+        side,
+        phase: combatantPhase(state, combatant.id, side),
+        initiativeTotal: result?.total ?? null,
+        delayed: Boolean(state.delayed?.[combatant.id]),
+      };
+    });
+}
+
+function snapshotRoster(combat, state, phase) {
+  return buildRosterIds(rosterDescriptors(combat, state), phase);
+}
+
+function lifecycleDiag(event, combat, state, extra = {}) {
+  const lifecycle = state?.lifecycle;
+  diag(event, {
+    combatId: shortId(combat?.id),
+    phase: state?.phase ?? lifecycle?.phase,
+    round: state?.round ?? lifecycle?.round,
+    phaseInstanceId: shortId(lifecycle?.phaseInstanceId),
+    status: lifecycle?.status,
+    revision: Number(state?.revision ?? 0),
+    ...extra,
+  });
+}
+
+/* -------------------------------------------- */
+/*  Start / end boundary processing             */
+/* -------------------------------------------- */
+
+async function runStartBoundary(combat, state, { onlyFailedOrInterrupted = false } = {}) {
+  let next = beginStartBoundary(state);
+  await persistState(combat, next, "phase-start-begin");
+  lifecycleDiag("phase-start-begin", combat, next);
+
+  const candidates = startCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  let failed = false;
+
+  for (const combatantId of candidates) {
+    // Re-read live state for phaseInstanceId / presence guards.
+    const live = getState(combat) ?? next;
+    if (live.lifecycle?.phaseInstanceId !== next.lifecycle.phaseInstanceId) {
+      lifecycleDiag("lifecycle-interrupted", combat, live, { reason: "instance-mismatch" });
+      break;
+    }
+    if (!getCombatant(combat, combatantId)) {
+      next = markCombatantStartResult(next, combatantId, {
+        ok: false,
+        skipped: true,
+        reason: "removed-combatant",
+      });
+      await persistState(combat, next, "combatant-start-skipped");
+      continue;
+    }
+    const priorStatus = next.lifecycle.turns?.[combatantId]?.startStatus;
+    if (priorStatus === BOUNDARY_STATUS.COMPLETED || priorStatus === BOUNDARY_STATUS.SKIPPED) {
+      continue;
+    }
+
+    // Honor PF2e same-round guards (e.g. Delay to Rearguard after Vanguard start).
+    const liveCombatant = getCombatant(combat, combatantId);
+    const roundOfLastTurn = Number(liveCombatant?.roundOfLastTurn ?? liveCombatant?.flags?.pf2e?.roundOfLastTurn ?? NaN);
+    if (Number.isFinite(roundOfLastTurn) && roundOfLastTurn === Number(next.round ?? combat.round)) {
+      next = markCombatantStartResult(next, combatantId, { ok: true });
+      await persistState(combat, next, "combatant-start-already");
+      lifecycleDiag("combatant-start-complete", combat, next, {
+        combatantId: shortId(combatantId),
+        reason: "already-started-this-round",
+      });
+      continue;
+    }
+
+    next = markCombatantStartProcessing(next, combatantId);
+    await persistState(combat, next, "combatant-start-processing");
+    lifecycleDiag("combatant-start-begin", combat, next, {
+      combatantId: shortId(combatantId),
+      boundary: "start",
+    });
+
+    const result = await processStartTurn(combat, combatantId);
+    if (result.ok) {
+      next = markCombatantStartResult(next, combatantId, { ok: true });
+      lifecycleDiag("combatant-start-complete", combat, next, {
+        combatantId: shortId(combatantId),
+        nativeMethod: result.nativeMethod,
+      });
+    } else {
+      failed = true;
+      next = markCombatantStartResult(next, combatantId, {
+        ok: false,
+        reason: adapterReasonMessage(result),
+      });
+      lifecycleDiag("combatant-start-failed", combat, next, {
+        combatantId: shortId(combatantId),
+        reason: adapterReasonMessage(result),
+      });
+    }
+    await persistState(combat, next, result.ok ? "combatant-start-complete" : "combatant-start-failed");
+
+    if (failed) {
+      // Stop further starts; preserve completed; leave error for GM recovery.
+      break;
+    }
+  }
+
+  if (failed) {
+    next = completeStartBoundary(next, { error: true });
+    await persistState(combat, next, "phase-start-error");
+    lifecycleDiag("lifecycle-error", combat, next, { boundary: "start" });
+    notify("error", localize("NDI.Lifecycle.StartFailed"));
+    return next;
+  }
+
+  next = completeStartBoundary(next, { error: false });
+  await persistState(combat, next, "phase-open");
+  lifecycleDiag("phase-open", combat, next);
+  return next;
+}
+
+async function runEndBoundary(combat, state, { onlyFailedOrInterrupted = false, forced = false } = {}) {
+  let next = beginEndBoundary(state, { forced });
+  await persistState(combat, next, "phase-end-begin");
+  lifecycleDiag("phase-end-begin", combat, next, { forced: Boolean(forced) });
+
+  const candidates = endCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  let failed = false;
+
+  for (const combatantId of candidates) {
+    const live = getState(combat) ?? next;
+    if (live.lifecycle?.phaseInstanceId !== next.lifecycle.phaseInstanceId) {
+      lifecycleDiag("lifecycle-interrupted", combat, live, { reason: "instance-mismatch" });
+      break;
+    }
+    if (!getCombatant(combat, combatantId)) {
+      next = markCombatantEndResult(next, combatantId, {
+        ok: false,
+        skipped: true,
+        reason: "removed-combatant",
+      });
+      await persistState(combat, next, "combatant-end-skipped");
+      continue;
+    }
+    const priorStatus = next.lifecycle.turns?.[combatantId]?.endStatus;
+    if (priorStatus === BOUNDARY_STATUS.COMPLETED || priorStatus === BOUNDARY_STATUS.SKIPPED) {
+      continue;
+    }
+
+    const liveCombatant = getCombatant(combat, combatantId);
+    const roundOfLastEnd = Number(
+      liveCombatant?.flags?.pf2e?.roundOfLastTurnEnd ?? NaN,
+    );
+    const endRound = Number(next.round ?? combat.round);
+    if (Number.isFinite(roundOfLastEnd) && roundOfLastEnd === endRound) {
+      next = markCombatantEndResult(next, combatantId, { ok: true });
+      await persistState(combat, next, "combatant-end-already");
+      lifecycleDiag("combatant-end-complete", combat, next, {
+        combatantId: shortId(combatantId),
+        reason: "already-ended-this-round",
+      });
+      continue;
+    }
+
+    next = markCombatantEndProcessing(next, combatantId);
+    await persistState(combat, next, "combatant-end-processing");
+    lifecycleDiag("combatant-end-begin", combat, next, {
+      combatantId: shortId(combatantId),
+      boundary: "end",
+    });
+
+    const result = await processEndTurn(combat, combatantId, { round: next.round });
+    if (result.ok) {
+      next = markCombatantEndResult(next, combatantId, { ok: true });
+      lifecycleDiag("combatant-end-complete", combat, next, {
+        combatantId: shortId(combatantId),
+        nativeMethod: result.nativeMethod,
+      });
+    } else {
+      failed = true;
+      next = markCombatantEndResult(next, combatantId, {
+        ok: false,
+        reason: adapterReasonMessage(result),
+      });
+      lifecycleDiag("combatant-end-failed", combat, next, {
+        combatantId: shortId(combatantId),
+        reason: adapterReasonMessage(result),
+      });
+    }
+    await persistState(combat, next, result.ok ? "combatant-end-complete" : "combatant-end-failed");
+
+    if (failed) break;
+  }
+
+  if (failed) {
+    next = completeEndBoundary(next, { error: true });
+    await persistState(combat, next, "phase-end-error");
+    lifecycleDiag("lifecycle-error", combat, next, { boundary: "end" });
+    notify("error", localize("NDI.Lifecycle.EndFailed"));
+    return { state: next, ok: false };
+  }
+
+  next = completeEndBoundary(next, { error: false });
+  await persistState(combat, next, "phase-ended");
+  lifecycleDiag("phase-ended", combat, next);
+  return { state: next, ok: true };
+}
+
+/**
+ * Enter a lifecycle phase: snapshot roster, run starts, open for play.
+ */
+async function enterLifecyclePhase(combat, state, targetPhase) {
+  const roster = snapshotRoster(combat, state, targetPhase);
+  let next = withHistory(state, `Enter ${targetPhase} phase`);
+  next.phase = targetPhase;
+  next.activeCombatantId = null;
+  if (targetPhase === PHASES.ENEMY) {
+    next.enemyPhaseSerial = Number(next.enemyPhaseSerial || 0) + 1;
+  }
+  if (state.phase === PHASES.INITIATIVE) {
+    next.initialInitiativePending = false;
+    next.promptOpen = false;
+  }
+
+  const lifecycle = createLifecycle({
+    phase: targetPhase,
+    round: next.round,
+    roster,
+  });
+  next.lifecycle = lifecycle;
+  next.lifecycle.status = LIFECYCLE_STATUS.PREPARING;
+
+  await clearNativeTurn(combat);
+  await persistState(combat, next, "phase-lifecycle-created");
+  lifecycleDiag("phase-lifecycle-created", combat, next, {
+    roster: roster.length,
+  });
+  lifecycleDiag("phase-roster-snapshotted", combat, next, {
+    roster: roster.map(shortId).join(","),
+  });
+
+  next = await runStartBoundary(combat, next);
+  return next;
+}
+
+/**
+ * Full phase transition transaction (authoritative GM only).
+ */
+async function transitionToPhase(combat, state, targetPhase, { force = false } = {}) {
+  const lockKey = combat.id;
+  if (phaseTransitionLocks.has(lockKey)) {
+    return phaseTransitionLocks.get(lockKey);
+  }
+
+  const run = (async () => {
+    try {
+      let next = state;
+
+      // Leaving a lifecycle phase: run end boundary if not already ended.
+      if (isLifecyclePhase(state.phase) && state.lifecycle) {
+        const lc = state.lifecycle;
+        const endDone =
+          lc.status === LIFECYCLE_STATUS.ENDED || lc.end?.status === BOUNDARY_STATUS.COMPLETED;
+
+        if (!endDone) {
+          if (
+            [LIFECYCLE_STATUS.STARTING, LIFECYCLE_STATUS.PREPARING, LIFECYCLE_STATUS.ENDING].includes(
+              lc.status,
+            )
+          ) {
+            notify("warn", localize("NDI.Lifecycle.TransitionBusy"));
+            return state;
+          }
+          if (lc.status === LIFECYCLE_STATUS.ERROR || lc.status === LIFECYCLE_STATUS.INTERRUPTED) {
+            notify("warn", localize("NDI.Lifecycle.ManualReviewRequired"));
+            return state;
+          }
+
+          // Open/complete: require all finished unless force.
+          const progress = lifecycleProgress(lc, { combatantIds: combatantIdList(combat) });
+          if (!progress.complete && !force) {
+            notify("warn", localize("NDI.Lifecycle.UnfinishedTurns", { count: progress.remaining.length }));
+            return state;
+          }
+          if (!progress.complete && force) {
+            const skipped = skipRemainingTurns(next, { userId: game.user.id });
+            next = skipped.state;
+            lifecycleDiag("phase-force-advanced", combat, next, {
+              skipped: skipped.skipped.length,
+            });
+          }
+
+          if (state.phase === PHASES.ENEMY && targetPhase !== PHASES.ENEMY) {
+            next = await expireDueRaisedShields(combat, next);
+          }
+
+          const endResult = await runEndBoundary(combat, next, { forced: force });
+          next = endResult.state;
+          if (!endResult.ok) return next;
+        } else if (state.phase === PHASES.ENEMY && targetPhase !== PHASES.ENEMY) {
+          next = await expireDueRaisedShields(combat, next);
+        }
+      }
+
+      // Enter next phase.
+      if (targetPhase === PHASES.INITIATIVE) {
+        next = beginRoundTransition(next);
+        // beginRoundTransition already increments round and clears lifecycle.
+        await mustUpdateCombat(combat, { round: next.round, turn: null });
+        await resetPartyNativeInitiative(combat);
+        await persistState(combat, next, "phase-change-initiative");
+        lifecycleDiag("phase-change-complete", combat, next);
+        await publicChat(`<h3>Round ${next.round}: Initiative Phase</h3>`);
+        return next;
+      }
+
+      if (isLifecyclePhase(targetPhase)) {
+        next = await enterLifecyclePhase(combat, next, targetPhase);
+        const label = targetPhase.charAt(0).toUpperCase() + targetPhase.slice(1);
+        await publicChat(`<h3>Round ${next.round}: ${label} Phase</h3>`);
+        return next;
+      }
+
+      next = setPhase(next, targetPhase);
+      await clearNativeTurn(combat);
+      await persistState(combat, next, "phase-change");
+      return next;
+    } finally {
+      phaseTransitionLocks.delete(lockKey);
+    }
+  })();
+
+  phaseTransitionLocks.set(lockKey, run);
+  return run;
+}
+
+/* -------------------------------------------- */
+/*  Core request handlers                       */
+/* -------------------------------------------- */
 
 async function startDynamicInitiative() {
   const combat = await ensureCombat();
   if (!combat) return;
   const existing = getState(combat);
   if (existing?.enabled) {
-    notify("info", "Dynamic Initiative is already active for this encounter.");
+    notify("info", localize("NDI.Notify.AlreadyActive"));
     return;
   }
 
@@ -131,13 +519,12 @@ async function startDynamicInitiative() {
 
 async function promptInitiative(combat, state) {
   if (state.phase !== PHASES.INITIATIVE) {
-    notify("warn", "Initiative can only be prompted during the Initiative phase.");
+    notify("warn", localize("NDI.Notify.PromptOnlyInitiative"));
     return;
   }
 
   const next = withHistory(state, "Prompt initiative");
-  next.schema = 2;
-  // Remove any legacy or prior-round results before opening a fresh prompt.
+  next.schema = 3;
   for (const combatantId of Object.keys(next.results ?? {})) {
     if (!resultForCurrentRound(next, combatantId)) delete next.results[combatantId];
   }
@@ -179,11 +566,11 @@ async function promptInitiative(combat, state) {
 
 async function submitInitiativeResult(combat, state, payload, requestUser) {
   if (state.phase !== PHASES.INITIATIVE || payload.promptId !== state.promptId) {
-    throw new Error("That initiative prompt is no longer active.");
+    throw new Error(localize("NDI.Error.PromptInactive"));
   }
   const combatant = getCombatant(combat, payload.combatantId);
-  if (!combatant || combatantSide(combatant) !== "party") throw new Error("Invalid player combatant.");
-  if (!userCanOwnCombatant(requestUser, combatant)) throw new Error("You do not own that combatant.");
+  if (!combatant || combatantSide(combatant) !== "party") throw new Error(localize("NDI.Error.InvalidPlayerCombatant"));
+  if (!userCanOwnCombatant(requestUser, combatant)) throw new Error(localize("NDI.Error.NotOwner"));
 
   const next = submitResult(state, combatant.id, {
     total: payload.total,
@@ -191,9 +578,6 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
     label: payload.label,
   });
   await persistState(combat, next, "submit-roll");
-  // Dynamic Initiative keeps its initiative result in module state. The native
-  // tracker is hidden and does not need a mirrored initiative update; avoiding
-  // that update also prevents incompatible tracker modules from rendering.
   try {
     await combatant.actor?.setFlag?.(MODULE_ID, "lastInitiativeSkill", payload.skill);
   } catch (error) {
@@ -207,7 +591,7 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
     (candidate) => resultForCurrentRound(next, candidate.id) || isUnconscious(candidate),
   );
   if (complete) {
-    notify("info", "All Dynamic Initiative checks are complete. The GM can begin Vanguard.");
+    notify("info", localize("NDI.Notify.ChecksComplete"));
     next.promptOpen = false;
     await persistState(combat, next, "prompt-complete");
   }
@@ -215,7 +599,7 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
 
 async function changeDC(combat, state, payload) {
   const value = Math.max(0, Math.min(99, Number(payload.dc)));
-  if (!Number.isFinite(value)) throw new Error("Enemy Initiative DC must be a number.");
+  if (!Number.isFinite(value)) throw new Error(localize("NDI.Error.DcNumber"));
   let next = withHistory(state, `Change Enemy Initiative DC to ${value}`);
   next.enemyDC = value;
   next = reclassifyResults(next);
@@ -239,35 +623,7 @@ async function changePhase(combat, state, payload) {
     combatants: combatantIdList(combat).length,
   });
 
-  let next = state;
-
-  if (state.phase === PHASES.ENEMY && target !== PHASES.ENEMY) {
-    next = await expireDueRaisedShields(combat, next);
-  }
-
-  if (target === PHASES.INITIATIVE && state.phase !== PHASES.INITIATIVE) {
-    next = beginRoundTransition(next);
-    await mustUpdateCombat(combat, { round: next.round, turn: null });
-    await resetPartyNativeInitiative(combat);
-  } else {
-    next = setPhase(next, target);
-    await clearNativeTurn(combat);
-  }
-
-  if (state.phase === PHASES.INITIATIVE && target !== PHASES.INITIATIVE) {
-    next.initialInitiativePending = false;
-    next.promptOpen = false;
-  }
-
-  const saved = await persistState(combat, next, "phase-change");
-  diag("phase-change-complete", {
-    combatId: shortId(combat.id),
-    phase: next.phase,
-    revision: saved.revision,
-    combatants: combatantIdList(combat).length,
-  });
-  const label = target.charAt(0).toUpperCase() + target.slice(1);
-  await publicChat(`<h3>Round ${next.round}: ${label} Phase</h3>`);
+  await transitionToPhase(combat, state, target, { force: Boolean(payload.force) });
 }
 
 function canClaimInPhase(combatant, state) {
@@ -276,52 +632,319 @@ function canClaimInPhase(combatant, state) {
   return combatantSide(combatant) === "party" && combatantPhase(state, combatant.id, "party") === state.phase;
 }
 
+function lifecycleAllowsActions(state) {
+  const status = state.lifecycle?.status;
+  // During preparing/starting/ending, do not allow claims or end-turn.
+  if (!isLifecyclePhase(state.phase)) return true;
+  return status === LIFECYCLE_STATUS.OPEN || status === LIFECYCLE_STATUS.COMPLETE;
+}
+
 async function claimTurn(combat, state, payload, requestUser) {
+  if (!lifecycleAllowsActions(state)) {
+    throw new Error(localize("NDI.Lifecycle.NotOpen"));
+  }
   const combatant = getCombatant(combat, payload.combatantId);
-  if (!combatant || isUnavailable(combatant)) throw new Error("That combatant cannot act.");
-  if (!canClaimInPhase(combatant, state)) throw new Error("That combatant is not eligible in the current phase.");
-  if (state.acted?.[combatant.id]) throw new Error("That combatant has already acted this round.");
+  if (!combatant || isUnavailable(combatant)) throw new Error(localize("NDI.Error.CannotAct"));
+  if (!canClaimInPhase(combatant, state)) throw new Error(localize("NDI.Error.NotEligible"));
+  if (state.acted?.[combatant.id] || isTurnEnded(state, combatant.id)) {
+    throw new Error(localize("NDI.Error.AlreadyActed"));
+  }
   if (state.activeCombatantId && state.activeCombatantId !== combatant.id) {
-    throw new Error("Another combatant is currently taking a turn.");
+    throw new Error(localize("NDI.Error.OtherActive"));
   }
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
-    throw new Error("You do not own that combatant.");
+    throw new Error(localize("NDI.Error.NotOwner"));
   }
-  if (state.phase === PHASES.ENEMY && !requestUser.isGM) throw new Error("Only the GM can activate enemies.");
+  if (state.phase === PHASES.ENEMY && !requestUser.isGM) throw new Error(localize("NDI.Error.GmOnlyEnemies"));
 
   const next = withHistory(state, `Activate ${combatantName(combatant)}`);
   next.activeCombatantId = combatant.id;
   await persistState(combat, next, "claim-turn");
+  // Native turn marker only (turnEvents suppressed) — lifecycle already ran at phase start.
   await setNativeTurn(combat, combatant.id);
+}
+
+function isTurnEnded(state, combatantId) {
+  const turn = state.lifecycle?.turns?.[combatantId];
+  if (turn) return Boolean(turn.ended || turn.skipped);
+  return Boolean(state.acted?.[combatantId]);
 }
 
 async function endTurn(combat, state, payload, requestUser) {
   const combatantId = payload.combatantId ?? state.activeCombatantId;
   const combatant = getCombatant(combat, combatantId);
-  if (!combatant) throw new Error("No active combatant.");
+  if (!combatant) throw new Error(localize("NDI.Error.NoActiveCombatant"));
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
-    throw new Error("You do not own the active combatant.");
+    throw new Error(localize("NDI.Error.NotOwner"));
   }
+
+  // Lifecycle phases: End Turn only marks finished — never native end processing.
+  if (isLifecyclePhase(state.phase) && state.lifecycle) {
+    if (!canEndTurn(state.lifecycle, combatant.id) && isTurnEnded(state, combatant.id)) {
+      // Idempotent: already ended.
+      lifecycleDiag("end-turn-complete", combat, state, {
+        combatantId: shortId(combatant.id),
+        reason: "already-ended",
+      });
+      return;
+    }
+    if (!canEndTurn(state.lifecycle, combatant.id)) {
+      throw new Error(localize("NDI.Lifecycle.CannotEndTurn"));
+    }
+
+    lifecycleDiag("end-turn-requested", combat, state, {
+      combatantId: shortId(combatant.id),
+      userId: shortId(requestUser.id),
+    });
+
+    const marked = markTurnEnded(withHistory(state, `End turn ${combatant.id}`), combatant.id, {
+      userId: requestUser.id,
+    });
+    if (!marked.changed) {
+      return;
+    }
+    await persistState(combat, marked.state, "end-turn");
+    await clearNativeTurn(combat);
+    lifecycleDiag("end-turn-complete", combat, marked.state, {
+      combatantId: shortId(combatant.id),
+    });
+
+    if (marked.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+      lifecycleDiag("phase-complete", combat, marked.state);
+      await maybeAutoAdvance(combat, marked.state);
+    }
+    return;
+  }
+
+  // Initiative / legacy fallback: mark acted only.
   const next = markActed(state, combatant.id, true);
   await persistState(combat, next, "end-turn");
   await clearNativeTurn(combat);
 }
 
-async function delayCombatant(combat, state, payload, requestUser) {
-  if (state.phase !== PHASES.VANGUARD) throw new Error("Only Vanguard combatants can delay to Rearguard.");
-  const combatant = getCombatant(combat, payload.combatantId ?? state.activeCombatantId);
-  if (!combatant || combatantSide(combatant) !== "party") throw new Error("Invalid Vanguard combatant.");
+async function reopenCombatantTurn(combat, state, payload, requestUser) {
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
-    throw new Error("You do not own that combatant.");
+    throw new Error(localize("NDI.Error.NotOwner"));
   }
-  const next = delayToRearguard(state, combatant.id);
+  if (!canReopenTurn(state.lifecycle, combatant.id)) {
+    throw new Error(localize("NDI.Lifecycle.CannotReopen"));
+  }
+
+  const result = reopenTurn(withHistory(state, `Reopen turn ${combatant.id}`), combatant.id);
+  if (!result.changed) return;
+  await persistState(combat, result.state, "reopen-turn");
+  lifecycleDiag("turn-reopened", combat, result.state, {
+    combatantId: shortId(combatant.id),
+  });
+}
+
+async function endRemainingTurns(combat, state, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  if (!isLifecyclePhase(state.phase) || !state.lifecycle) {
+    throw new Error(localize("NDI.Lifecycle.NotOpen"));
+  }
+  if (![LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(state.lifecycle.status)) {
+    throw new Error(localize("NDI.Lifecycle.NotOpen"));
+  }
+
+  const result = skipRemainingTurns(withHistory(state, "End remaining turns"), {
+    userId: requestUser.id,
+  });
+  if (!result.changed) {
+    notify("info", localize("NDI.Lifecycle.NoRemaining"));
+    return;
+  }
+  await persistState(combat, result.state, "end-remaining");
+  lifecycleDiag("phase-complete", combat, result.state, { skipped: result.skipped.length });
+  await maybeAutoAdvance(combat, result.state);
+}
+
+async function forceAdvance(combat, state, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const target = nextPhaseValue(state.phase);
+  await transitionToPhase(combat, state, target, { force: true });
+}
+
+function nextPhaseValue(phase) {
+  const order = [PHASES.INITIATIVE, PHASES.VANGUARD, PHASES.ENEMY, PHASES.REARGUARD];
+  const index = order.indexOf(phase);
+  return order[(index + 1) % order.length];
+}
+
+async function maybeAutoAdvance(combat, state) {
+  if (!isPrimaryGM()) return;
+  if (state.lifecycle?.status !== LIFECYCLE_STATUS.COMPLETE) return;
+
+  let mode = AUTO_ADVANCE.OFF;
+  try {
+    mode = game.settings.get(MODULE_ID, SETTINGS.AUTO_ADVANCE_PHASE);
+  } catch (_error) {
+    mode = AUTO_ADVANCE.OFF;
+  }
+
+  if (mode === AUTO_ADVANCE.OFF) return;
+
+  const key = `${combat.id}:${state.lifecycle.phaseInstanceId}`;
+  if (mode === AUTO_ADVANCE.PROMPT) {
+    if (autoAdvancePrompted.has(key)) return;
+    autoAdvancePrompted.add(key);
+    const DialogV2 = foundry?.applications?.api?.DialogV2;
+    const label = state.phase;
+    let confirmed = false;
+    if (DialogV2?.confirm) {
+      confirmed = await DialogV2.confirm({
+        window: { title: localize("NDI.Lifecycle.AdvancePhase") },
+        content: `<p>${localize("NDI.Lifecycle.PhaseCompletePrompt", { phase: label })}</p>`,
+        yes: { default: true },
+      });
+    } else {
+      confirmed = window.confirm(localize("NDI.Lifecycle.PhaseCompletePrompt", { phase: label }));
+    }
+    if (!confirmed) return;
+    const live = getState(combat);
+    if (!live?.enabled || live.lifecycle?.phaseInstanceId !== state.lifecycle.phaseInstanceId) return;
+    await transitionToPhase(combat, live, nextPhaseValue(live.phase), { force: false });
+    return;
+  }
+
+  if (mode === AUTO_ADVANCE.AUTOMATIC) {
+    // Queued mutation — not a timing heuristic.
+    const live = getState(combat);
+    if (!live?.enabled || live.lifecycle?.status !== LIFECYCLE_STATUS.COMPLETE) return;
+    if (phaseTransitionLocks.has(combat.id)) return;
+    await transitionToPhase(combat, live, nextPhaseValue(live.phase), { force: false });
+  }
+}
+
+async function retryFailedStart(combat, state) {
+  if (!state.lifecycle || state.lifecycle.status !== LIFECYCLE_STATUS.ERROR) {
+    if (state.lifecycle?.status !== LIFECYCLE_STATUS.INTERRUPTED) {
+      throw new Error(localize("NDI.Lifecycle.NoFailedStart"));
+    }
+  }
+  lifecycleDiag("lifecycle-recovery-requested", combat, state, { action: "retry-start" });
+  // Reset overall status so start can resume; keep completed combatants.
+  let next = structuredClone(state);
+  next.lifecycle.status = LIFECYCLE_STATUS.STARTING;
+  next.lifecycle.start.status = BOUNDARY_STATUS.PROCESSING;
+  next.lifecycle.start.failedCombatants = [];
+  await persistState(combat, next, "retry-failed-start");
+  next = await runStartBoundary(combat, next, { onlyFailedOrInterrupted: true });
+  return next;
+}
+
+async function skipFailedStartHandler(combat, state) {
+  let next = skipFailedStarts(withHistory(state, "Skip failed starts"));
+  // If all starts resolved, open the phase.
+  const pending = startCandidates(next.lifecycle);
+  if (pending.length === 0) {
+    next = completeStartBoundary(next, { error: false });
+  } else {
+    next.lifecycle.status = LIFECYCLE_STATUS.ERROR;
+  }
+  await persistState(combat, next, "skip-failed-start");
+  lifecycleDiag("lifecycle-recovery-requested", combat, next, { action: "skip-start" });
+  return next;
+}
+
+async function retryFailedEnd(combat, state) {
+  if (
+    !state.lifecycle ||
+    ![LIFECYCLE_STATUS.ERROR, LIFECYCLE_STATUS.INTERRUPTED, LIFECYCLE_STATUS.ENDING].includes(
+      state.lifecycle.status,
+    )
+  ) {
+    throw new Error(localize("NDI.Lifecycle.NoFailedEnd"));
+  }
+  lifecycleDiag("lifecycle-recovery-requested", combat, state, { action: "retry-end" });
+  let next = structuredClone(state);
+  next.lifecycle.status = LIFECYCLE_STATUS.ENDING;
+  next.lifecycle.end.status = BOUNDARY_STATUS.PROCESSING;
+  next.lifecycle.end.failedCombatants = [];
+  await persistState(combat, next, "retry-failed-end");
+  const endResult = await runEndBoundary(combat, next, { onlyFailedOrInterrupted: true });
+  if (!endResult.ok) return endResult.state;
+
+  // After successful end recovery, enter the next phase.
+  return transitionToPhase(combat, endResult.state, nextPhaseValue(endResult.state.phase), {
+    force: false,
+  });
+}
+
+async function skipFailedEndHandler(combat, state) {
+  let next = skipFailedEnds(withHistory(state, "Skip failed ends"));
+  const pending = endCandidates(next.lifecycle);
+  if (pending.length === 0) {
+    next = completeEndBoundary(next, { error: false });
+    await persistState(combat, next, "skip-failed-end");
+    lifecycleDiag("lifecycle-recovery-requested", combat, next, { action: "skip-end" });
+    return transitionToPhase(combat, next, nextPhaseValue(next.phase), { force: false });
+  }
+  next.lifecycle.status = LIFECYCLE_STATUS.ERROR;
+  await persistState(combat, next, "skip-failed-end");
+  return next;
+}
+
+async function delayCombatant(combat, state, payload, requestUser) {
+  if (state.phase !== PHASES.VANGUARD) throw new Error(localize("NDI.Error.DelayOnlyVanguard"));
+  const combatant = getCombatant(combat, payload.combatantId ?? state.activeCombatantId);
+  if (!combatant || combatantSide(combatant) !== "party") throw new Error(localize("NDI.Error.InvalidVanguard"));
+  if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
+    throw new Error(localize("NDI.Error.NotOwner"));
+  }
+  // Delay removes them from Vanguard play; mark ended/skipped in lifecycle so phase can complete.
+  let next = delayToRearguard(state, combatant.id);
+  if (next.lifecycle?.roster?.includes(combatant.id)) {
+    const turn = next.lifecycle.turns?.[combatant.id];
+    if (turn && !turn.ended) {
+      turn.ended = true;
+      turn.skipped = true;
+      turn.endedBy = requestUser.id;
+      turn.endedAt = Date.now();
+      turn.endReason = "delayed-to-rearguard";
+      // Delayed combatants leave this phase; skip end-of-phase processing for them
+      // so end-turn runs in Rearguard instead (native once-per-phase model).
+      if (turn.endStatus === BOUNDARY_STATUS.PENDING) {
+        turn.endStatus = BOUNDARY_STATUS.SKIPPED;
+      }
+    }
+    next.acted ??= {};
+    next.acted[combatant.id] = true;
+    const progress = lifecycleProgress(next.lifecycle, { combatantIds: combatantIdList(combat) });
+    if (progress.complete && next.lifecycle.status === LIFECYCLE_STATUS.OPEN) {
+      next.lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
+    }
+  }
   await persistState(combat, next, "delay-rearguard");
   await clearNativeTurn(combat);
+  if (next.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+    await maybeAutoAdvance(combat, next);
+  }
 }
 
 async function markCombatantActed(combat, state, payload) {
   const combatant = getCombatant(combat, payload.combatantId);
-  if (!combatant) throw new Error("Invalid combatant.");
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+
+  if (isLifecyclePhase(state.phase) && state.lifecycle?.roster?.includes(combatant.id)) {
+    if (payload.acted === false) {
+      const result = reopenTurn(withHistory(state, `Restore turn ${combatant.id}`), combatant.id);
+      await persistState(combat, result.state, "mark-acted");
+    } else {
+      const result = markTurnEnded(withHistory(state, `Complete turn ${combatant.id}`), combatant.id, {
+        userId: game.user.id,
+      });
+      await persistState(combat, result.state, "mark-acted");
+      if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+        await maybeAutoAdvance(combat, result.state);
+      }
+    }
+    if ((getState(combat)?.activeCombatantId ?? null) == null) await clearNativeTurn(combat);
+    return;
+  }
+
   const next = markActed(state, combatant.id, payload.acted !== false);
   await persistState(combat, next, "mark-acted");
   if (next.activeCombatantId == null) await clearNativeTurn(combat);
@@ -337,13 +960,28 @@ async function undo(combat, state) {
 
   const undone = undoState(state);
   if (!undone) {
-    notify("info", "There is nothing to undo.");
+    notify("info", localize("NDI.Notify.NothingToUndo"));
     return;
   }
 
-  // Normalize the restored snapshot against combatants still in the encounter.
-  // Deleted combatants are not recreated; a fresh revision is assigned on save.
+  if (undoCrossesPhaseEnd(state) || state.lifecycle?.end?.status === BOUNDARY_STATUS.COMPLETED) {
+    const DialogV2 = foundry?.applications?.api?.DialogV2;
+    const content = `<p><strong>${localize("NDI.Undo.PhaseStateOnly")}</strong></p><p>${localize("NDI.Undo.PhaseEndWarning")}</p>`;
+    let confirmed = false;
+    if (DialogV2?.confirm) {
+      confirmed = await DialogV2.confirm({
+        window: { title: localize("NDI.Undo.PhaseStateOnly") },
+        content,
+        yes: { default: false },
+      });
+    } else {
+      confirmed = window.confirm(localize("NDI.Undo.PhaseEndWarning"));
+    }
+    if (!confirmed) return;
+  }
+
   const restored = normalizeUndoRestore(undone.state, combatantIdList(combat));
+  // Do not replay native start/end from undo — state only.
   const saved = await persistState(combat, restored, "undo");
   await mustUpdateCombat(combat, { round: restored.round, turn: null });
   if (restored.activeCombatantId) await setNativeTurn(combat, restored.activeCombatantId);
@@ -354,20 +992,17 @@ async function undo(combat, state) {
     revision: saved.revision,
     combatants: combatantIdList(combat).length,
   });
-  notify("info", `Undid: ${undone.label}`);
+  notify("info", localize("NDI.Notify.Undid", { label: undone.label }));
 }
 
 async function endDynamicCombat(combat, state) {
-  // The UI already asks for confirmation, so delete the encounter directly
-  // instead of invoking Foundry's second confirmation dialog.  Clear any
-  // module-managed shield effects first and preserve that cleaned state.
   const cleaned = await clearManagedRaisedShields(combat, state);
   const next = foundry.utils.deepClone(cleaned ?? state);
   next.enabled = false;
+  next.lifecycle = null;
   try {
     await persistState(combat, next, "combat-end-cleanup");
   } catch (error) {
-    // Combat may already be mid-delete; do not block encounter removal.
     console.error(`${MODULE_ID} | combat end cleanup failed`, {
       combatId: shortId(combat.id),
       reason: error?.message ?? "cleanup-failed",
@@ -386,7 +1021,7 @@ async function dispatchGMRequest(payload) {
 
   const combat = game.combats.get(payload.combatId) ?? getCombat();
   const state = getState(combat);
-  if (!combat || !state?.enabled) throw new Error("Dynamic Initiative is not active.");
+  if (!combat || !state?.enabled) throw new Error(localize("NDI.Error.NotActive"));
 
   switch (payload.type) {
     case REQUESTS.PROMPT:
@@ -394,29 +1029,49 @@ async function dispatchGMRequest(payload) {
     case REQUESTS.SUBMIT_ROLL:
       return await submitInitiativeResult(combat, state, payload, requestUser);
     case REQUESTS.SET_DC:
-      if (!requestUser.isGM) throw new Error("Only the GM can change the DC.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await changeDC(combat, state, payload);
     case REQUESTS.SET_SKILL:
-      if (!requestUser.isGM) throw new Error("Only the GM can set the suggested skill.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await changeSuggestedSkill(combat, state, payload);
     case REQUESTS.SET_PHASE:
-      if (!requestUser.isGM) throw new Error("Only the GM can change phases.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await changePhase(combat, state, payload);
     case REQUESTS.CLAIM:
       return await claimTurn(combat, state, payload, requestUser);
     case REQUESTS.END_TURN:
       return await endTurn(combat, state, payload, requestUser);
+    case REQUESTS.REOPEN_TURN:
+      return await reopenCombatantTurn(combat, state, payload, requestUser);
+    case REQUESTS.END_REMAINING:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await endRemainingTurns(combat, state, requestUser);
+    case REQUESTS.FORCE_ADVANCE:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await forceAdvance(combat, state, requestUser);
+    case REQUESTS.RETRY_FAILED_START:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await retryFailedStart(combat, state);
+    case REQUESTS.SKIP_FAILED_START:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await skipFailedStartHandler(combat, state);
+    case REQUESTS.RETRY_FAILED_END:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await retryFailedEnd(combat, state);
+    case REQUESTS.SKIP_FAILED_END:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await skipFailedEndHandler(combat, state);
     case REQUESTS.DELAY:
     case REQUESTS.MOVE_REARGUARD:
       return await delayCombatant(combat, state, payload, requestUser);
     case REQUESTS.MARK_ACTED:
-      if (!requestUser.isGM) throw new Error("Only the GM can correct acted status.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await markCombatantActed(combat, state, payload);
     case REQUESTS.UNDO:
-      if (!requestUser.isGM) throw new Error("Only the GM can undo.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await undo(combat, state);
     case REQUESTS.END_COMBAT:
-      if (!requestUser.isGM) throw new Error("Only the GM can end combat.");
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await endDynamicCombat(combat, state);
     default:
       throw new Error(`Unknown Dynamic Initiative request: ${payload.type}`);
@@ -464,4 +1119,31 @@ export function partyRollRecipients(combat) {
     for (const user of activePlayerOwners(combatant)) recipients.add(user.id);
   }
   return recipients;
+}
+
+/**
+ * On ready/reload: convert uncertain Processing lifecycle entries to interrupted.
+ */
+export async function reconcileLifecycleOnReady() {
+  if (!isPrimaryGM()) return;
+  const combat = getCombat();
+  const state = getState(combat);
+  if (!combat || !state?.enabled || !state.lifecycle) return;
+
+  const lc = state.lifecycle;
+  const uncertain =
+    [LIFECYCLE_STATUS.STARTING, LIFECYCLE_STATUS.ENDING, LIFECYCLE_STATUS.PREPARING].includes(lc.status) ||
+    Object.values(lc.turns ?? {}).some(
+      (t) =>
+        t.startStatus === BOUNDARY_STATUS.PROCESSING || t.endStatus === BOUNDARY_STATUS.PROCESSING,
+    );
+
+  if (!uncertain) return;
+
+  const { interruptUncertainProcessing } = await import("./lifecycle.js");
+  const next = structuredClone(state);
+  next.lifecycle = interruptUncertainProcessing(next.lifecycle);
+  await persistState(combat, next, "lifecycle-restored");
+  lifecycleDiag("lifecycle-restored", combat, next, { reason: "reload-interrupt" });
+  notify("warn", localize("NDI.Lifecycle.Interrupted"));
 }

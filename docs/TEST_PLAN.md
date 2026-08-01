@@ -8,6 +8,8 @@ Run:
 npm test
 ```
 
+Lifecycle-specific plan: `docs/SLICE_0_2_0_TEST_PLAN.md`.
+
 | # | Check | Covered by |
 | --- | --- | --- |
 | 1 | module.json valid JSON | `persistence.test.mjs` |

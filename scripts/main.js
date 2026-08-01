@@ -1,5 +1,5 @@
-import { MODULE_ID, MODULE_TITLE, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
-import { requestAction, socketHandler } from "./controller.js";
+import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
+import { reconcileLifecycleOnReady, requestAction, socketHandler } from "./controller.js";
 import { registerRaisedShield } from "./shields.js";
 import { handleInitiativePrompt, removeUI, renderDock, syncNativeCombatTracker } from "./ui.js";
 import { debug, getCombat, getState } from "./utils.js";
@@ -57,6 +57,21 @@ function registerSettings() {
     restricted: true,
   });
 
+  game.settings.register(MODULE_ID, SETTINGS.AUTO_ADVANCE_PHASE, {
+    name: "NDI.Setting.AutoAdvancePhase.Name",
+    hint: "NDI.Setting.AutoAdvancePhase.Hint",
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      [AUTO_ADVANCE.OFF]: "NDI.Setting.AutoAdvancePhase.Off",
+      [AUTO_ADVANCE.PROMPT]: "NDI.Setting.AutoAdvancePhase.Prompt",
+      [AUTO_ADVANCE.AUTOMATIC]: "NDI.Setting.AutoAdvancePhase.Automatic",
+    },
+    default: AUTO_ADVANCE.OFF,
+    restricted: true,
+  });
+
   game.settings.register(MODULE_ID, SETTINGS.DEBUG, {
     name: "Dynamic Initiative Debug Logging",
     hint: "Write concise Dynamic Initiative state diagnostics to the browser console (combat id, phase, revision, counts). No actor or token names.",
@@ -107,6 +122,7 @@ Hooks.once("ready", () => {
     render: renderDock,
   });
 
+  void reconcileLifecycleOnReady();
   renderDock();
   debug("Ready", { core: game.version, pf2e: game.system.version });
 });

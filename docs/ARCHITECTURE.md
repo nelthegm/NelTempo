@@ -33,7 +33,7 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
 
 ```js
 {
-  schema: 2,                 // document schema version
+  schema: 3,                 // document schema version
   revision: 0,               // increments on successful state writes only
   enabled: true,
   phase: "initiative" | "vanguard" | "enemy" | "rearguard",
@@ -50,9 +50,12 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
   delayed: { [combatantId]: true },
   lastSkills: { [combatantId]: skillSlug },
   shields: { [itemUuid]: ShieldEntry },
+  lifecycle: PhaseLifecycle | null,  // Vanguard/Enemy/Rearguard only
   history: [{ label, at, state }]  // undo stack; nested states have empty history
 }
 ```
+
+See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 
 Combatant identity is always the Foundry **combatant document id**, never display names.
 
