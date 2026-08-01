@@ -82,6 +82,8 @@ function emptyTurnRecord() {
   };
 }
 
+export { emptyTurnRecord };
+
 /**
  * Snapshot a new lifecycle instance for entering a phase.
  * @param {{ phase: string, round: number, roster: string[], phaseInstanceId?: string }} args
@@ -674,18 +676,19 @@ function uniquePush(list, id) {
  */
 export function buildRosterIds(combatants, phase) {
   const list = (combatants ?? []).filter((c) => c?.id);
+  // Placement-phase driven (supports GM Enemy/Vanguard overrides regardless of side).
   let filtered;
   if (phase === PHASES.VANGUARD) {
-    filtered = list.filter((c) => c.side === "party" && c.phase === PHASES.VANGUARD);
+    filtered = list.filter((c) => c.phase === PHASES.VANGUARD);
   } else if (phase === PHASES.REARGUARD) {
-    filtered = list.filter((c) => c.side === "party" && c.phase === PHASES.REARGUARD);
+    filtered = list.filter((c) => c.phase === PHASES.REARGUARD);
   } else if (phase === PHASES.ENEMY) {
-    filtered = list.filter((c) => c.side === "enemy");
+    filtered = list.filter((c) => c.phase === PHASES.ENEMY);
   } else {
     filtered = [];
   }
 
-  // Deterministic: higher initiative total first (party), then combatant id.
+  // Deterministic: higher initiative total first, then combatant id.
   filtered.sort((a, b) => {
     const ta = Number.isFinite(Number(a.initiativeTotal)) ? Number(a.initiativeTotal) : -Infinity;
     const tb = Number.isFinite(Number(b.initiativeTotal)) ? Number(b.initiativeTotal) : -Infinity;

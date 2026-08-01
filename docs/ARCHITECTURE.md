@@ -36,7 +36,7 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
 
 ```js
 {
-  schema: 3,                 // document schema version
+  schema: 4,                 // document schema version
   revision: 0,               // increments on successful state writes only
   enabled: true,
   phase: "initiative" | "vanguard" | "enemy" | "rearguard",
@@ -54,11 +54,22 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
   lastSkills: { [combatantId]: skillSlug },
   shields: { [itemUuid]: ShieldEntry },
   lifecycle: PhaseLifecycle | null,  // Vanguard/Enemy/Rearguard only; includes timing (0.2.1)
+  placements: {},                  // GM placement overrides (0.3.0)
+  placementCorrections: {},        // next-round queue (0.3.0)
+  placementAudit: [],              // capped placement audit (0.3.0)
   history: [{ label, at, state }]  // undo stack; nested states have empty history
 }
 ```
 
 `lifecycle.timing` (0.2.1) holds condition snapshots, Confused priority gate, GM overrides, and audit entries scoped to `phaseInstanceId`. See `docs/SLICE_0_2_1_CONDITION_TIMING.md`.
+
+Schema **4** (0.3.0) adds GM placement maps — see `docs/SLICE_0_3_0_GM_INITIATIVE_EDITOR.md`:
+
+```js
+placements: { [combatantId]: { phase, round, originalPhase, method, appliedBy, appliedAt } },
+placementCorrections: { [combatantId]: { targetPhase, effectiveRound, status, createdBy, createdAt, … } },
+placementAudit: [ { event, at, …short ids… } ]
+```
 
 See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 

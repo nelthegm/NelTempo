@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Added GM-only **Edit Initiative Placement** DialogV2 (This Round / Next Round).
+- Current-round corrections follow a lifecycle-safe matrix; unsafe options explain why and offer Next Round.
+- Durable next-round placement queue (replace with confirmation, cancel, consume once on round transition).
+- Current-phase join processes only the missing start boundary; corrections never create a new `phaseInstanceId` alone.
+- Original initiative ChatMessages are preserved; placement audit records GM corrections separately (schema 4).
+- Documentation: `docs/SLICE_0_3_0_GM_INITIATIVE_EDITOR.md`, `docs/SLICE_0_3_0_TEST_PLAN.md`.
+
 ## 0.2.2
 
 - Persistent dock/launcher now use Foundry’s interface-layer z-index (`--z-index-app`, fallback 30) so Actor, NPC, Item, Journal, DialogV2, and other application windows render above NelTempo.

@@ -1,4 +1,4 @@
-# NelTempo v0.2.2 — Playtest Checklist
+# NelTempo v0.3.0 — Playtest Checklist
 
 *Formerly Dynamic Initiative.* Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
@@ -80,6 +80,21 @@ See `docs/SLICE_0_2_2_UI_LAYERING.md`.
 - [ ] Repeat for Restrained and Confused Delay tooltips without portrait Delay Blocked overlays.
 - [ ] Confirm **Must Act First** / **Waiting for Confused Turn** still appear for Confused priority.
 - [ ] Refresh with Grabbed active; no Delay Blocked portrait overlay returns.
+
+## GM initiative / phase editor (0.3.0)
+
+See `docs/SLICE_0_3_0_TEST_PLAN.md`.
+
+- [ ] As GM, open **Edit Initiative Placement** from a portrait; as player, confirm the control is absent.
+- [ ] During Initiative, set Vanguard / Enemy / Rearguard / Pending; original chat rolls unchanged.
+- [ ] In open Vanguard, move an unacted combatant to Rearguard; no end-turn effects; later Rearguard start/end once.
+- [ ] Join current Open phase for a Pending combatant; only that combatant receives start processing.
+- [ ] Reject completed combatant rejoin and moves into ended phases; Next Round remains available.
+- [ ] Queue / refresh / replace (confirm) / cancel a next-round correction; confirm one-time application.
+- [ ] Grabbed / Restrained / Confused remain after correction; Allow Delay Once not consumed.
+- [ ] Dual-GM or stale dialog: one mutation succeeds; other gets state-changed message.
+- [ ] Undo after current-phase join shows placement state-only warning.
+- [ ] Confirm 0.2.2 sheet layering still correct with editor DialogV2 open/closed.
 
 ## Rearguard and Next Round
 

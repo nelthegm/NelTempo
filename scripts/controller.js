@@ -49,6 +49,22 @@ import {
   refreshCombatantTiming,
 } from "./timing-service.js";
 import {
+  PLACEMENTS,
+  PLACEMENT_METHODS,
+  PLACEMENT_MODES,
+  appendToOpenRoster,
+  applyCurrentRoundPlacement,
+  buildEditorProjection,
+  cancelQueuedCorrection,
+  destinationIsCurrent,
+  evaluatePlacementOptions,
+  hasStartBoundaryThisRound,
+  leaveOpenRoster,
+  pushPlacementAudit,
+  queueNextRoundCorrection,
+  undoCrossesPlacementStart,
+} from "./placement-editor.js";
+import {
   TIMING_OVERRIDE,
   consumeTimingOverride,
   clearTimingOverride,
@@ -222,12 +238,20 @@ function lifecycleDiag(event, combat, state, extra = {}) {
 /*  Start / end boundary processing             */
 /* -------------------------------------------- */
 
-async function runStartBoundary(combat, state, { onlyFailedOrInterrupted = false } = {}) {
+async function runStartBoundary(
+  combat,
+  state,
+  { onlyFailedOrInterrupted = false, onlyCombatantIds = null } = {},
+) {
   let next = beginStartBoundary(state);
   await persistState(combat, next, "phase-start-begin");
   lifecycleDiag("phase-start-begin", combat, next);
 
-  const candidates = startCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  let candidates = startCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  if (Array.isArray(onlyCombatantIds) && onlyCombatantIds.length) {
+    const allow = new Set(onlyCombatantIds.map(String));
+    candidates = candidates.filter((id) => allow.has(String(id)));
+  }
   let failed = false;
 
   for (const combatantId of candidates) {
@@ -1169,25 +1193,39 @@ async function undo(combat, state) {
     return;
   }
 
-  if (undoCrossesPhaseEnd(state) || state.lifecycle?.end?.status === BOUNDARY_STATUS.COMPLETED) {
+  if (undoCrossesPhaseEnd(state) || state.lifecycle?.end?.status === BOUNDARY_STATUS.COMPLETED || undoCrossesPlacementStart(state)) {
     const DialogV2 = foundry?.applications?.api?.DialogV2;
-    const content = `<p><strong>${localize("NDI.Undo.PhaseStateOnly")}</strong></p><p>${localize("NDI.Undo.PhaseEndWarning")}</p>`;
+    const placementStart = undoCrossesPlacementStart(state);
+    const title = placementStart
+      ? localize("NDI.Placement.UndoStateOnly")
+      : localize("NDI.Undo.PhaseStateOnly");
+    const warning = placementStart
+      ? localize("NDI.Placement.UndoNativeWarning")
+      : localize("NDI.Undo.PhaseEndWarning");
+    const content = `<p><strong>${title}</strong></p><p>${warning}</p>`;
     let confirmed = false;
     if (DialogV2?.confirm) {
       confirmed = await DialogV2.confirm({
-        window: { title: localize("NDI.Undo.PhaseStateOnly") },
+        window: { title },
         content,
         yes: { default: false },
       });
     } else {
-      confirmed = window.confirm(localize("NDI.Undo.PhaseEndWarning"));
+      confirmed = window.confirm(warning);
     }
     if (!confirmed) return;
   }
 
   const restored = normalizeUndoRestore(undone.state, combatantIdList(combat));
   // Do not replay native start/end from undo — state only.
-  const saved = await persistState(combat, restored, "undo");
+  let toPersist = restored;
+  if (undoCrossesPlacementStart(state)) {
+    toPersist = pushPlacementAudit(restored, "placement-undo-state-only", {
+      combatId: shortId(combat.id),
+      revision: String(state.revision ?? 0),
+    });
+  }
+  const saved = await persistState(combat, toPersist, "undo");
   await mustUpdateCombat(combat, { round: restored.round, turn: null });
   if (restored.activeCombatantId) await setNativeTurn(combat, restored.activeCombatantId);
 
@@ -1363,6 +1401,235 @@ async function timingReconcileRequest(combat, state, requestUser) {
   }
 }
 
+/* -------------------------------------------- */
+/*  GM initiative / phase placement editor      */
+/* -------------------------------------------- */
+
+/**
+ * Process a single combatant's missing start boundary while phase stays Open.
+ * Does not flip lifecycle to Starting or create a new phaseInstanceId.
+ */
+async function runSingleCombatantStart(combat, state, combatantId) {
+  let next = structuredClone(state);
+  const id = String(combatantId);
+  if (!next.lifecycle?.turns?.[id]) return next;
+
+  const liveCombatant = getCombatant(combat, id);
+  const roundOfLastTurn = Number(
+    liveCombatant?.roundOfLastTurn ?? liveCombatant?.flags?.pf2e?.roundOfLastTurn ?? NaN,
+  );
+  if (Number.isFinite(roundOfLastTurn) && roundOfLastTurn === Number(next.round ?? combat.round)) {
+    next = markCombatantStartResult(next, id, { ok: true });
+    next = pushPlacementAudit(next, "placement-start-boundary-preserved", {
+      combatantId: shortId(id),
+      reason: "already-started-this-round",
+      round: String(next.round),
+    });
+    return next;
+  }
+
+  if (hasStartBoundaryThisRound(next.lifecycle, id)) {
+    next = pushPlacementAudit(next, "placement-start-boundary-preserved", {
+      combatantId: shortId(id),
+      reason: "start-already-recorded",
+      round: String(next.round),
+    });
+    return next;
+  }
+
+  next = markCombatantStartProcessing(next, id);
+  await persistState(combat, next, "placement-start-processing");
+  next = pushPlacementAudit(next, "placement-start-boundary-invoked", {
+    combatantId: shortId(id),
+    round: String(next.round),
+    phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
+  });
+
+  const result = await processStartTurn(combat, id);
+  if (result.ok) {
+    next = markCombatantStartResult(next, id, { ok: true });
+  } else {
+    next = markCombatantStartResult(next, id, {
+      ok: false,
+      reason: adapterReasonMessage(result),
+    });
+    next.lifecycle.status = LIFECYCLE_STATUS.ERROR;
+    notify("error", localize("NDI.Lifecycle.StartFailed"));
+  }
+  return next;
+}
+
+async function placementApply(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+
+  let live = getState(combat) ?? state;
+  if (
+    payload.expectedRevision != null &&
+    Number(payload.expectedRevision) !== Number(live.revision ?? 0)
+  ) {
+    live = pushPlacementAudit(live, "placement-stale-request-rejected", {
+      combatantId: shortId(combatant.id),
+      revision: String(live.revision ?? 0),
+      reason: "revision-mismatch",
+    });
+    await persistState(combat, live, "placement-stale");
+    throw new Error(localize("NDI.Placement.StateChanged"));
+  }
+
+  const targetPhase = payload.targetPhase;
+  if (!Object.values(PLACEMENTS).includes(targetPhase)) {
+    throw new Error(localize("NDI.Placement.InvalidTarget"));
+  }
+
+  const mode = payload.mode === PLACEMENT_MODES.NEXT_ROUND
+    ? PLACEMENT_MODES.NEXT_ROUND
+    : PLACEMENT_MODES.CURRENT_ROUND;
+  const side = combatantSide(combatant);
+  const options = evaluatePlacementOptions(live, combatant.id, { side });
+
+  live = pushPlacementAudit(live, "placement-correction-requested", {
+    combatantId: shortId(combatant.id),
+    sourcePhase: options.sourcePhase,
+    targetPhase,
+    mode,
+    round: String(live.round),
+    userId: shortId(requestUser.id),
+  });
+
+  if (mode === PLACEMENT_MODES.NEXT_ROUND) {
+    const queued = queueNextRoundCorrection(withHistory(live, `Queue placement ${combatant.id}`), combatant.id, targetPhase, {
+      userId: requestUser.id,
+      replace: Boolean(payload.replace),
+    });
+    if (!queued.ok) {
+      if (queued.requiresReplaceConfirm && !payload.replace) {
+        throw new Error(localize("NDI.Placement.QueueExists"));
+      }
+      throw new Error(localize("NDI.Placement.CorrectionRejected"));
+    }
+    await persistState(combat, queued.state, "placement-queue");
+    notify("info", localize("NDI.Placement.CorrectionQueued"));
+    return;
+  }
+
+  const opt = options.currentRoundOptions.find((entry) => entry.phase === targetPhase);
+  if (!opt?.allowed) {
+    live = pushPlacementAudit(live, "placement-correction-rejected", {
+      combatantId: shortId(combatant.id),
+      targetPhase,
+      reason: opt?.reason ?? "unsafe",
+      userId: shortId(requestUser.id),
+    });
+    await persistState(combat, live, "placement-rejected");
+    throw new Error(localize("NDI.Placement.CorrectionRejected"));
+  }
+
+  const sourcePhase = options.sourcePhase;
+  let next = withHistory(live, `Place ${combatant.id} → ${targetPhase}`);
+  const phaseInstanceBefore = next.lifecycle?.phaseInstanceId ?? null;
+
+  // Leave current open phase roster when moving away from the active phase.
+  if (
+    next.lifecycle &&
+    [LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(next.lifecycle.status) &&
+    next.lifecycle.roster?.includes(combatant.id) &&
+    sourcePhase === next.phase &&
+    targetPhase !== next.phase
+  ) {
+    const left = leaveOpenRoster(next, combatant.id, { userId: requestUser.id });
+    if (!left.changed && left.reason === "turn-completed") {
+      throw new Error(localize("NDI.Placement.TurnCompleted"));
+    }
+    next = left.state;
+    if (next.lifecycle?.timing) {
+      next.lifecycle.timing = markPriorityResolved(next.lifecycle.timing, combatant.id);
+      next.lifecycle.timing = recomputePriorityGate(next.lifecycle.timing, next.lifecycle);
+    }
+    next = pushPlacementAudit(next, "placement-current-phase-left", {
+      combatantId: shortId(combatant.id),
+      sourcePhase,
+      targetPhase,
+      phaseInstanceId: shortId(phaseInstanceBefore),
+    });
+  }
+
+  next = applyCurrentRoundPlacement(next, combatant.id, targetPhase, {
+    userId: requestUser.id,
+    originalPhase: sourcePhase,
+    method:
+      targetPhase === PLACEMENTS.PENDING
+        ? PLACEMENT_METHODS.GM_PENDING_RESET
+        : PLACEMENT_METHODS.GM_CURRENT,
+  });
+
+  // Join current open phase when destination is the active phase.
+  if (
+    destinationIsCurrent(next, targetPhase) &&
+    next.lifecycle &&
+    next.lifecycle.status === LIFECYCLE_STATUS.OPEN
+  ) {
+    const total = resultForCurrentRound(next, combatant.id)?.total ?? null;
+    const joined = appendToOpenRoster(next, combatant.id, { initiativeTotal: total });
+    next = joined.state;
+    if (joined.changed) {
+      next = pushPlacementAudit(next, "placement-current-phase-joined", {
+        combatantId: shortId(combatant.id),
+        targetPhase,
+        phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
+      });
+      await persistState(combat, next, "placement-join");
+      next = await runSingleCombatantStart(combat, next, combatant.id);
+      const reconciled = reconcileTimingState(combat, next, { reason: "placement-join" });
+      next = reconciled.state;
+    }
+  } else if (next.lifecycle && [LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(next.lifecycle.status)) {
+    const reconciled = reconcileTimingState(combat, next, { reason: "placement-correction" });
+    next = reconciled.state;
+  }
+
+  // Guarantee: correction never creates a new phaseInstanceId by itself.
+  if (
+    phaseInstanceBefore &&
+    next.lifecycle?.phaseInstanceId &&
+    next.lifecycle.phaseInstanceId !== phaseInstanceBefore
+  ) {
+    next.lifecycle.phaseInstanceId = phaseInstanceBefore;
+  }
+
+  await persistState(combat, next, "placement-apply");
+  notify("info", localize("NDI.Placement.CorrectionApplied"));
+}
+
+async function placementQueue(combat, state, payload, requestUser) {
+  return placementApply(combat, state, { ...payload, mode: PLACEMENT_MODES.NEXT_ROUND }, requestUser);
+}
+
+async function placementCancelQueue(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const live = getState(combat) ?? state;
+  const result = cancelQueuedCorrection(withHistory(live, `Cancel queued placement ${combatant.id}`), combatant.id, {
+    userId: requestUser.id,
+  });
+  if (!result.ok) throw new Error(localize("NDI.Placement.NoQueue"));
+  await persistState(combat, result.state, "placement-cancel-queue");
+  notify("info", localize("NDI.Placement.CorrectionCancelled"));
+}
+
+export function getPlacementEditorProjection(combat, combatantId) {
+  const state = getState(combat);
+  if (!state?.enabled) return null;
+  const combatant = getCombatant(combat, combatantId);
+  if (!combatant) return null;
+  return buildEditorProjection(state, combatantId, {
+    side: combatantSide(combatant),
+    revision: state.revision,
+  });
+}
+
 /**
  * Authoritative GM reconciliation after a condition item change.
  * Serialized through the combat mutation queue.
@@ -1471,6 +1738,12 @@ async function dispatchGMRequest(payload) {
       return await timingClearOverride(combat, state, payload, requestUser);
     case REQUESTS.TIMING_RECONCILE:
       return await timingReconcileRequest(combat, state, requestUser);
+    case REQUESTS.PLACEMENT_APPLY:
+      return await placementApply(combat, state, payload, requestUser);
+    case REQUESTS.PLACEMENT_QUEUE:
+      return await placementQueue(combat, state, payload, requestUser);
+    case REQUESTS.PLACEMENT_CANCEL_QUEUE:
+      return await placementCancelQueue(combat, state, payload, requestUser);
     default:
       throw new Error(`Unknown NelTempo request: ${payload.type}`);
   }

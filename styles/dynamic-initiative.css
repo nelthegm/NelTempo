@@ -852,3 +852,60 @@ body.ndi-suppress-native-tracker .combat-tracker {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.ndi-placement-edit {
+  margin-left: 2px;
+}
+
+.ndi-placement-hint {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border: 1px solid rgba(214, 166, 42, 0.55);
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #f0e6c8;
+  background: rgba(20, 16, 22, 0.85);
+  vertical-align: middle;
+}
+
+.ndi-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ndi-placement-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: min(24rem, 90vw);
+}
+
+.ndi-placement-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.ndi-placement-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ndi-placement-buttons button {
+  margin: 0;
+}
+
+.ndi-placement-buttons button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

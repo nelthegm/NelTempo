@@ -1,5 +1,5 @@
 import { MODULE_ID, REQUESTS, SETTINGS } from "./constants.js";
-import { requestAction } from "./controller.js";
+import { getPlacementEditorProjection, requestAction } from "./controller.js";
 import { rollDynamicInitiative } from "./initiative.js";
 import {
   canEndTurn,
@@ -8,6 +8,7 @@ import {
   lifecycleProgress,
   LIFECYCLE_STATUS,
 } from "./lifecycle.js";
+import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
 import { isTimingEnforced } from "./timing-service.js";
 import {
@@ -80,15 +81,15 @@ function phaseCombatants(combat, state) {
       return combatants.filter((combatant) => combatantSide(combatant) === "party");
     case PHASES.VANGUARD:
       return combatants.filter(
-        (combatant) =>
-          combatantSide(combatant) === "party" && combatantPhase(state, combatant.id, "party") === PHASES.VANGUARD,
+        (combatant) => combatantPhase(state, combatant.id, combatantSide(combatant)) === PHASES.VANGUARD,
       );
     case PHASES.ENEMY:
-      return combatants.filter((combatant) => combatantSide(combatant) === "enemy");
+      return combatants.filter(
+        (combatant) => combatantPhase(state, combatant.id, combatantSide(combatant)) === PHASES.ENEMY,
+      );
     case PHASES.REARGUARD:
       return combatants.filter(
-        (combatant) =>
-          combatantSide(combatant) === "party" && combatantPhase(state, combatant.id, "party") === PHASES.REARGUARD,
+        (combatant) => combatantPhase(state, combatant.id, combatantSide(combatant)) === PHASES.REARGUARD,
       );
     default:
       return [];
@@ -239,7 +240,10 @@ function portraitHTML(combatant, state) {
   const ownerCanRoll = game.user.isGM || userCanOwnCombatant(game.user, combatant);
   const finished = isTurnFinished(state, combatant.id);
   const rollButton =
-    state.phase === PHASES.INITIATIVE && !result && ownerCanRoll && !isUnconscious(combatant)
+    state.phase === PHASES.INITIATIVE &&
+    ownerCanRoll &&
+    !isUnconscious(combatant) &&
+    (!result || combatantPhase(state, combatant.id, combatantSide(combatant)) === PLACEMENTS.PENDING)
       ? `<button type="button" class="ndi-mini-button" data-action="roll" data-combatant-id="${combatant.id}" aria-label="${escapeHTML(t("NDI.Control.Roll"))}">
            <i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.Roll"))}
          </button>`
@@ -259,7 +263,22 @@ function portraitHTML(combatant, state) {
          <i class="fa-solid ${finished ? "fa-rotate-left" : "fa-check"}"></i>
        </button>`
     : "";
-  const resultBadge = result && Number.isFinite(Number(result.total))
+
+  const placementEdit = game.user.isGM
+    ? `<button type="button" class="ndi-icon-button ndi-placement-edit" data-action="edit-placement" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Placement.Edit"))}" aria-label="${escapeHTML(t("NDI.Placement.Edit"))}">
+           <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+           <span class="ndi-sr-only">${escapeHTML(t("NDI.Placement.Edit"))}</span>
+         </button>`
+    : "";
+
+  const queue = game.user.isGM ? queuedCorrectionFor(state, combatant.id) : null;
+  const placement = placementForCurrentRound(state, combatant.id);
+  let placementHint = "";
+  if (queue) {
+    placementHint = `<span class="ndi-placement-hint" title="${escapeHTML(t("NDI.Placement.NextRoundHint", { phase: placementPhaseLabel(queue.targetPhase) }))}">${escapeHTML(t("NDI.Placement.NextRoundShort", { phase: placementPhaseLabel(queue.targetPhase) }))}</span>`;
+  } else if (placement?.method) {
+    placementHint = `<span class="ndi-placement-hint" title="${escapeHTML(t("NDI.Placement.GmCorrected"))}">${escapeHTML(t("NDI.Placement.GmCorrectedShort"))}</span>`;
+  }  const resultBadge = result && Number.isFinite(Number(result.total))
     ? `<span class="ndi-result-badge">${result.total}</span>`
     : "";
   const endedBadge = finished
@@ -322,8 +341,8 @@ function portraitHTML(combatant, state) {
       <span class="ndi-name">${escapeHTML(combatantName(combatant))}</span>
       <span class="ndi-status">${escapeHTML(statusFor(combatant, state))}</span>
     </button>
-    <span class="ndi-card-actions">${rollButton}${delayButton}${gmCorrect}</span>
-    <div class="ndi-turn-controls">${turnControls}${gmTiming}</div>
+    <span class="ndi-card-actions">${rollButton}${delayButton}${gmCorrect}${placementEdit}</span>
+    <div class="ndi-turn-controls">${turnControls}${gmTiming}${placementHint}</div>
   </article>`;
 }
 
@@ -370,9 +389,9 @@ function initiativeStageHTML(combatants, state) {
   const rearguard = [];
 
   for (const combatant of combatants) {
-    const result = resultForCurrentRound(state, combatant.id);
-    if (isUnconscious(combatant) || result?.phase === PHASES.REARGUARD) rearguard.push(combatant);
-    else if (result?.phase === PHASES.VANGUARD) vanguard.push(combatant);
+    const phase = combatantPhase(state, combatant.id, combatantSide(combatant));
+    if (isUnconscious(combatant) || phase === PHASES.REARGUARD) rearguard.push(combatant);
+    else if (phase === PHASES.VANGUARD) vanguard.push(combatant);
     else awaiting.push(combatant);
   }
 
@@ -653,6 +672,138 @@ async function confirmDialog(title, content) {
   return window.confirm(content);
 }
 
+function placementReasonText(reason) {
+  switch (reason) {
+    case "phase-already-ended":
+      return t("NDI.Placement.PhaseEnded");
+    case "turn-completed":
+      return t("NDI.Placement.TurnCompleted");
+    case "lifecycle-busy":
+      return t("NDI.Placement.LifecycleBusy");
+    case "pending-unsafe":
+      return t("NDI.Placement.PendingUnsafe");
+    case "already-there":
+      return t("NDI.Placement.AlreadyThere");
+    default:
+      return t("NDI.Placement.QueueInstead");
+  }
+}
+
+function placementPhaseLabel(phase) {
+  switch (phase) {
+    case PLACEMENTS.VANGUARD:
+      return t("NDI.Phase.Vanguard");
+    case PLACEMENTS.ENEMY:
+      return t("NDI.Phase.Enemy");
+    case PLACEMENTS.REARGUARD:
+      return t("NDI.Phase.Rearguard");
+    case PLACEMENTS.PENDING:
+      return t("NDI.Placement.Pending");
+    default:
+      return phase;
+  }
+}
+
+async function openPlacementEditor(combatantId) {
+  if (!game.user.isGM) return;
+  const combat = getCombat();
+  const projection = getPlacementEditorProjection(combat, combatantId);
+  const combatant = getCombatant(combat, combatantId);
+  if (!projection || !combatant) return;
+
+  const currentButtons = projection.currentRoundOptions
+    .map((opt) => {
+      const label = placementPhaseLabel(opt.phase);
+      const title = opt.allowed ? label : placementReasonText(opt.reason);
+      return `<button type="button" data-placement-mode="current-round" data-placement-phase="${opt.phase}" ${opt.allowed ? "" : "disabled"} title="${escapeHTML(title)}">${escapeHTML(label)}</button>`;
+    })
+    .join("");
+  const nextButtons = projection.nextRoundOptions
+    .map((opt) => {
+      const label = placementPhaseLabel(opt.phase);
+      return `<button type="button" data-placement-mode="next-round" data-placement-phase="${opt.phase}" title="${escapeHTML(t("NDI.Placement.QueueForNextRound"))}">${escapeHTML(label)}</button>`;
+    })
+    .join("");
+  const cancelQueue = projection.queued
+    ? `<button type="button" data-placement-cancel="1">${escapeHTML(t("NDI.Placement.CancelQueued"))}</button>`
+    : "";
+  const queuedLine = projection.queued
+    ? `<p><strong>${escapeHTML(t("NDI.Placement.Queued"))}:</strong> ${escapeHTML(placementPhaseLabel(projection.queued.targetPhase))} (${escapeHTML(t("NDI.Placement.EffectiveRound", { round: projection.queued.effectiveRound }))})</p>`
+    : "";
+
+  const content = `
+    <div class="ndi-placement-editor">
+      <p><strong>${escapeHTML(combatantName(combatant))}</strong></p>
+      <p>${escapeHTML(t("NDI.Placement.CurrentRound"))}: ${escapeHTML(String(projection.round))} · ${escapeHTML(phaseLabel(projection.phase))}</p>
+      <p>${escapeHTML(t("NDI.Placement.CurrentPlacement"))}: ${escapeHTML(placementPhaseLabel(projection.sourcePhase))}</p>
+      <p>${escapeHTML(t("NDI.Placement.Started"))}: ${projection.started ? "✓" : "—"} · ${escapeHTML(t("NDI.Control.Ended"))}: ${projection.ended ? "✓" : "—"}</p>
+      ${queuedLine}
+      <div class="ndi-placement-section"><h3>${escapeHTML(t("NDI.Placement.CurrentRound"))}</h3><div class="ndi-placement-buttons">${currentButtons}</div></div>
+      <div class="ndi-placement-section"><h3>${escapeHTML(t("NDI.Placement.NextRound"))}</h3><div class="ndi-placement-buttons">${nextButtons}</div></div>
+      <div class="ndi-placement-buttons">${cancelQueue}</div>
+    </div>
+  `;
+
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) {
+    notifyFallback(content);
+    return;
+  }
+
+  await DialogV2.wait({
+    window: { title: t("NDI.Placement.Edit") },
+    content,
+    buttons: [
+      {
+        action: "close",
+        label: t("NDI.Placement.Close"),
+        default: true,
+      },
+    ],
+    render: (_event, dialog) => {
+      const root = dialog?.element ?? dialog;
+      root?.querySelectorAll?.("[data-placement-phase]")?.forEach((button) => {
+        button.addEventListener("click", async (event) => {
+          event.preventDefault();
+          if (button.disabled) return;
+          const mode = button.dataset.placementMode;
+          const phase = button.dataset.placementPhase;
+          let replace = false;
+          if (mode === PLACEMENT_MODES.NEXT_ROUND && projection.queued) {
+            replace = await confirmDialog(
+              t("NDI.Placement.ReplaceQueued"),
+              t("NDI.Placement.ReplaceQueuedConfirm"),
+            );
+            if (!replace) return;
+          }
+          dialog.close?.();
+          await requestAction(
+            mode === PLACEMENT_MODES.NEXT_ROUND ? REQUESTS.PLACEMENT_QUEUE : REQUESTS.PLACEMENT_APPLY,
+            {
+              combatantId,
+              targetPhase: phase,
+              mode,
+              replace,
+              expectedRevision: projection.revision,
+            },
+          );
+        });
+      });
+      root?.querySelector?.("[data-placement-cancel]")?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        dialog.close?.();
+        await requestAction(REQUESTS.PLACEMENT_CANCEL_QUEUE, { combatantId });
+      });
+    },
+  });
+}
+
+function notifyFallback(html) {
+  // Extremely degraded environments without DialogV2 — surface a notice only.
+  ui?.notifications?.warn?.(t("NDI.Placement.DialogUnavailable"));
+  void html;
+}
+
 function bindDockEvents(root, combat, state) {
   const setPortraitTokenHover = (combatantId, hovered) => {
     const combatant = getCombatant(combat, combatantId);
@@ -780,6 +931,10 @@ function bindDockEvents(root, combat, state) {
       case "timing-clear-override":
         event.stopPropagation();
         await requestAction(REQUESTS.TIMING_CLEAR_OVERRIDE, { combatantId });
+        break;
+      case "edit-placement":
+        event.stopPropagation();
+        await openPlacementEditor(combatantId);
         break;
       case "toggle-acted":
         event.stopPropagation();

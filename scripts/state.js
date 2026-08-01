@@ -1,4 +1,12 @@
 import { normalizeLifecycle, interruptUncertainProcessing } from "./lifecycle.js";
+import {
+  PLACEMENTS,
+  consumeQueuedCorrections,
+  normalizePlacementAudit,
+  normalizePlacementCorrections,
+  normalizePlacements,
+  placementForCurrentRound,
+} from "./placement-editor.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -15,9 +23,16 @@ export const PHASE_ORDER = Object.freeze([
 ]);
 
 /** Map keys whose entries are keyed by combatant id. */
-export const COMBATANT_STATE_MAPS = Object.freeze(["results", "acted", "delayed", "lastSkills"]);
+export const COMBATANT_STATE_MAPS = Object.freeze([
+  "results",
+  "acted",
+  "delayed",
+  "lastSkills",
+  "placements",
+  "placementCorrections",
+]);
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -46,6 +61,12 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     shields: {},
     /** Active phase lifecycle record, or null during Initiative / idle. */
     lifecycle: null,
+    /** Current-round GM placement overrides keyed by combatant id. */
+    placements: {},
+    /** Next-round placement correction queue keyed by combatant id. */
+    placementCorrections: {},
+    /** Capped placement audit trail. */
+    placementAudit: [],
     history: [],
   };
 }
@@ -98,14 +119,20 @@ function sanitizeResult(result) {
       : Number.isFinite(Number(totalRaw))
         ? Number(totalRaw)
         : null;
+  const phase =
+    result.phase == null || result.phase === ""
+      ? null
+      : PHASE_ORDER.includes(result.phase)
+        ? result.phase
+        : PHASES.REARGUARD;
   const cleaned = {
     total,
     skill: result.skill == null ? null : String(result.skill),
     label: result.label == null ? null : String(result.label),
-    phase: PHASE_ORDER.includes(result.phase) ? result.phase : PHASES.REARGUARD,
     round: Math.max(1, Number(result.round ?? 1) || 1),
     at: Number.isFinite(Number(result.at)) ? Number(result.at) : Date.now(),
   };
+  if (phase) cleaned.phase = phase;
   if (result.forced) cleaned.forced = true;
   return cleaned;
 }
@@ -175,6 +202,9 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     lastSkills: {},
     shields: {},
     lifecycle: null,
+    placements: {},
+    placementCorrections: {},
+    placementAudit: [],
     history: [],
   };
 
@@ -210,6 +240,15 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     if (idSet && cleaned.combatantId && !idSet.has(String(cleaned.combatantId))) continue;
     next.shields[String(uuid)] = cleaned;
   }
+
+  next.placements = normalizePlacements(source.placements, {
+    combatantIds: idSet,
+    round: next.round,
+  });
+  next.placementCorrections = normalizePlacementCorrections(source.placementCorrections, {
+    combatantIds: idSet,
+  });
+  next.placementAudit = normalizePlacementAudit(source.placementAudit);
 
   // Lifecycle: normalize and prune roster against current combatants.
   // Never invent a lifecycle for Initiative; preserve open/ending instances.
@@ -269,6 +308,9 @@ export function reclassifyResults(state) {
 }
 
 export function combatantPhase(state, combatantId, side = "party") {
+  const placement = placementForCurrentRound(state, combatantId);
+  if (placement?.phase === PLACEMENTS.PENDING) return PLACEMENTS.PENDING;
+  if (placement?.phase) return placement.phase;
   if (side === "enemy") return PHASES.ENEMY;
   if (state.delayed?.[combatantId]) return PHASES.REARGUARD;
   return resultForCurrentRound(state, combatantId)?.phase ?? PHASES.REARGUARD;
@@ -318,7 +360,10 @@ export function beginRoundTransition(state) {
   next.acted = {};
   next.delayed = {};
   next.lifecycle = null;
-  return next;
+  next.placements = {};
+  // Preserve queue across the clear, then consume entries for the new round.
+  next.placementCorrections = structuredClone(state.placementCorrections ?? {});
+  return consumeQueuedCorrections(next);
 }
 
 export function setPhase(state, phase) {

@@ -26,6 +26,7 @@ const INCLUDE = [
   "scripts/main.js",
   "scripts/pf2e-condition-adapter.js",
   "scripts/pf2e-lifecycle-adapter.js",
+  "scripts/placement-editor.js",
   "scripts/shields.js",
   "scripts/state.js",
   "scripts/timing.js",
@@ -38,6 +39,8 @@ const INCLUDE = [
   "docs/SLICE_0_2_1_CONDITION_TIMING.md",
   "docs/SLICE_0_2_1_TEST_PLAN.md",
   "docs/SLICE_0_2_2_UI_LAYERING.md",
+  "docs/SLICE_0_3_0_GM_INITIATIVE_EDITOR.md",
+  "docs/SLICE_0_3_0_TEST_PLAN.md",
 ];
 
 function ensureIncludes() {

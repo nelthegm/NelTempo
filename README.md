@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.2.2  
+**Current version:** 0.3.0  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.3.0, Forge VTT hosting
 
@@ -64,6 +64,16 @@ game.dynamicInitiative.start();
 - **End Turn** only marks you finished for the phase; PF2e end-of-turn effects (including persistent damage) resolve when the whole phase ends.
 - Before the phase ends, you can **Reopen Turn** if you need to act again.
 - A Vanguard character can use **Delay to Rearguard**.
+
+## GM initiative / phase editor (0.3.0)
+
+GMs can open **Edit Initiative Placement** on a portrait to:
+
+- Correct placement **This Round** when lifecycle-safe (Vanguard, Enemy, Rearguard, Pending)
+- **Queue** a placement for the **Next Round** (replace with confirmation, or cancel)
+- Join the current Open phase (missing start boundary runs once) or move to a future phase without premature boundaries
+
+Players cannot open the editor. Original initiative chat rolls are never edited. See `docs/SLICE_0_3_0_GM_INITIATIVE_EDITOR.md`.
 
 ## Phase lifecycle (0.2.0+)
 
@@ -196,6 +206,8 @@ game.dynamicInitiative.end();
 - `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` — phase lifecycle (0.2.0)
 - `docs/SLICE_0_2_1_CONDITION_TIMING.md` — condition timing (0.2.1)
 - `docs/SLICE_0_2_2_UI_LAYERING.md` — sheet layering and Delay badge cleanup (0.2.2)
+- `docs/SLICE_0_3_0_GM_INITIATIVE_EDITOR.md` — GM initiative/phase editor (0.3.0)
+- `docs/SLICE_0_3_0_TEST_PLAN.md` — 0.3.0 editor verification
 - `docs/MAINTENANCE_V14_STATE_REPAIR.md` — V14 repair notes
 - `docs/TEST_PLAN.md` — static, mocked, and runtime test plan
 - `docs/SLICE_0_2_1_TEST_PLAN.md` — 0.2.1 timing verification

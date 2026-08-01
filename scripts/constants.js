@@ -52,4 +52,7 @@ export const REQUESTS = Object.freeze({
   TIMING_RESUME_CURRENT_ONCE: "timing-resume-current-once",
   TIMING_CLEAR_OVERRIDE: "timing-clear-override",
   TIMING_RECONCILE: "timing-reconcile",
+  PLACEMENT_APPLY: "placement-apply",
+  PLACEMENT_QUEUE: "placement-queue",
+  PLACEMENT_CANCEL_QUEUE: "placement-cancel-queue",
 });

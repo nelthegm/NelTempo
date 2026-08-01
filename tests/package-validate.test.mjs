@@ -21,6 +21,7 @@ for (const file of [
   "scripts/pf2e-condition-adapter.js",
   "scripts/timing.js",
   "scripts/timing-service.js",
+  "scripts/placement-editor.js",
 ]) {
   execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" });
 }
