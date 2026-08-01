@@ -9,6 +9,13 @@ import {
   LIFECYCLE_STATUS,
 } from "./lifecycle.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
+import { isTimingEnforced } from "./timing-service.js";
+import {
+  evaluateDelayEligibility,
+  evaluateEndTurnEligibility,
+  evaluateReopenEligibility,
+  timingBadgeFor,
+} from "./timing.js";
 import {
   activePlayerOwners,
   combatantName,
@@ -99,6 +106,9 @@ function canUserClaim(combatant, state) {
 function canUserEndTurn(combatant, state) {
   if (!isLifecyclePhase(state.phase) || !state.lifecycle) return false;
   if (!canEndTurn(state.lifecycle, combatant.id)) return false;
+  const enforce = isTimingEnforced();
+  const eligibility = evaluateEndTurnEligibility(state.lifecycle, combatant.id, { enforce });
+  if (!eligibility.allowed) return false;
   if (game.user.isGM) return true;
   return userCanOwnCombatant(game.user, combatant);
 }
@@ -106,8 +116,62 @@ function canUserEndTurn(combatant, state) {
 function canUserReopen(combatant, state) {
   if (!isLifecyclePhase(state.phase) || !state.lifecycle) return false;
   if (!canReopenTurn(state.lifecycle, combatant.id)) return false;
+  const enforce = isTimingEnforced();
+  const eligibility = evaluateReopenEligibility(state.lifecycle, combatant.id, {
+    isGM: game.user.isGM,
+    enforce,
+  });
+  if (!eligibility.allowed) return false;
+  // Players cannot use the generic reopen for Confused turns.
+  if (eligibility.requiresOverride && !game.user.isGM) return false;
+  if (eligibility.requiresOverride && game.user.isGM) return false; // use dedicated control
   if (game.user.isGM) return true;
   return userCanOwnCombatant(game.user, combatant);
+}
+
+function endTurnDisabledReason(combatant, state) {
+  if (!state.lifecycle) return null;
+  const eligibility = evaluateEndTurnEligibility(state.lifecycle, combatant.id, {
+    enforce: isTimingEnforced(),
+  });
+  if (eligibility.allowed) return null;
+  if (eligibility.reason === "waiting-for-confused") return t("NDI.Timing.ResolveConfusedFirst");
+  if (eligibility.reason === "waiting-for-priority-combatant") return t("NDI.Timing.WaitingForPriority");
+  return t("NDI.Lifecycle.CannotEndTurn");
+}
+
+function delayEligibilityFor(combatant, state) {
+  return evaluateDelayEligibility(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
+}
+
+function timingBadgeLabel(key) {
+  switch (key) {
+    case "must-act-first":
+      return t("NDI.Timing.MustActFirst");
+    case "waiting-confused":
+      return t("NDI.Timing.WaitingConfused");
+    case "delay-blocked-grabbed":
+      return t("NDI.Timing.DelayBlockedGrabbed");
+    case "delay-blocked-restrained":
+      return t("NDI.Timing.DelayBlockedRestrained");
+    case "delay-blocked-confused":
+      return t("NDI.Timing.DelayBlockedConfused");
+    case "gm-override":
+      return t("NDI.Timing.GmOverride");
+    case "resume-allowed":
+      return t("NDI.Timing.ResumeAllowed");
+    default:
+      return null;
+  }
+}
+
+function delayTooltip(combatant, state) {
+  const eligibility = delayEligibilityFor(combatant, state);
+  if (eligibility.allowed) return t("NDI.Control.Delay");
+  if (eligibility.blockReason === "confused") return t("NDI.Timing.CannotDelayConfused");
+  if (eligibility.blockReason === "restrained") return t("NDI.Timing.CannotDelayRestrained");
+  if (eligibility.blockReason === "grabbed") return t("NDI.Timing.CannotDelayGrabbed");
+  return t("NDI.Timing.DelayBlocked");
 }
 
 function statusFor(combatant, state) {
@@ -121,6 +185,9 @@ function statusFor(combatant, state) {
   if (lifecycleBusy(state)) return t("NDI.Lifecycle.StartingPhase").replace("…", "");
   if (state.lifecycle?.status === LIFECYCLE_STATUS.ENDING) return t("NDI.Lifecycle.EndingPhase");
   if (isTurnFinished(state, combatant.id)) return t("NDI.Control.Ended");
+  const badge = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
+  const badgeLabel = timingBadgeLabel(badge);
+  if (badgeLabel) return badgeLabel;
   if (state.activeCombatantId === combatant.id) return "Active turn";
   if (state.delayed?.[combatant.id]) return "Delayed to Rearguard";
   return "Ready";
@@ -135,6 +202,11 @@ function portraitClasses(combatant, state) {
   if (resultPhase) classes.push(`is-${resultPhase}`);
   if (isUnconscious(combatant)) classes.push("is-unconscious");
   if (isTurnFinished(state, combatant.id)) classes.push("is-ended");
+  const badge = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
+  if (badge === "must-act-first") classes.push("is-priority");
+  if (badge === "waiting-confused") classes.push("is-waiting-priority");
+  if (badge?.startsWith("delay-blocked")) classes.push("is-delay-blocked");
+  if (badge === "gm-override" || badge === "resume-allowed") classes.push("is-timing-override");
   return classes.join(" ");
 }
 
@@ -148,12 +220,16 @@ function portraitHTML(combatant, state) {
            <i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.Roll"))}
          </button>`
       : "";
-  const delayButton =
-    state.phase === PHASES.VANGUARD && !finished && ownerCanRoll && lifecycleIsOpen(state)
-      ? `<button type="button" class="ndi-icon-button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Control.Delay"))}" aria-label="${escapeHTML(t("NDI.Control.Delay"))}">
+
+  let delayButton = "";
+  if (state.phase === PHASES.VANGUARD && !finished && ownerCanRoll && lifecycleIsOpen(state)) {
+    const delayOk = delayEligibilityFor(combatant, state).allowed;
+    const tip = delayTooltip(combatant, state);
+    delayButton = `<button type="button" class="ndi-icon-button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(tip)}" aria-label="${escapeHTML(tip)}" ${delayOk ? "" : "disabled aria-disabled=\"true\""}>
            <i class="fa-solid fa-arrow-down"></i>
-         </button>`
-      : "";
+         </button>`;
+  }
+
   const gmCorrect = game.user.isGM && state.phase !== PHASES.INITIATIVE && lifecycleIsOpen(state)
     ? `<button type="button" class="ndi-icon-button ndi-gm-correct" data-action="toggle-acted" data-combatant-id="${combatant.id}" title="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.MarkComplete"))}" aria-label="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.MarkComplete"))}">
          <i class="fa-solid ${finished ? "fa-rotate-left" : "fa-check"}"></i>
@@ -166,20 +242,48 @@ function portraitHTML(combatant, state) {
     ? `<span class="ndi-ended-badge" aria-hidden="true"><i class="fa-solid fa-check"></i></span>`
     : "";
 
+  const badgeKey = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
+  const badgeText = timingBadgeLabel(badgeKey);
+  const timingBadge = badgeText
+    ? `<span class="ndi-timing-badge" title="${escapeHTML(badgeText)}">${escapeHTML(badgeText)}</span>`
+    : "";
+
   let turnControls = "";
   if (isLifecyclePhase(state.phase) && state.lifecycle?.roster?.includes(combatant.id)) {
     if (canUserEndTurn(combatant, state)) {
       turnControls = `<button type="button" class="ndi-end-turn-btn ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Control.EndTurn"))}" aria-label="${escapeHTML(t("NDI.Control.EndTurn"))}">
         <i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}
       </button>`;
+    } else if (!finished && canEndTurn(state.lifecycle, combatant.id)) {
+      const why = endTurnDisabledReason(combatant, state);
+      if (why) {
+        turnControls = `<button type="button" class="ndi-end-turn-btn" data-action="end-turn" data-combatant-id="${combatant.id}" title="${escapeHTML(why)}" aria-label="${escapeHTML(why)}" disabled aria-disabled="true">
+          <i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}
+        </button>`;
+      }
     } else if (canUserReopen(combatant, state)) {
       turnControls = `<button type="button" class="ndi-reopen-turn-btn" data-action="reopen-turn" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Control.ReopenTurn"))}" aria-label="${escapeHTML(t("NDI.Control.ReopenTurn"))}">
         <i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Control.ReopenTurn"))}
       </button>`;
     } else if (finished) {
-      turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Control.Ended"))}</span>`;
+      const reopenEval = evaluateReopenEligibility(state.lifecycle, combatant.id, {
+        isGM: game.user.isGM,
+        enforce: isTimingEnforced(),
+      });
+      if (game.user.isGM && reopenEval.requiresOverride) {
+        turnControls = `<button type="button" class="ndi-reopen-turn-btn" data-action="timing-reopen-confused" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}" aria-label="${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}">
+          <i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}
+        </button>`;
+      } else {
+        turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Control.Ended"))}</span>`;
+      }
     }
   }
+
+  const gmTiming =
+    game.user.isGM && lifecycleIsOpen(state) && isLifecyclePhase(state.phase)
+      ? gmTimingMenuHTML(combatant, state)
+      : "";
 
   return `<article class="${portraitClasses(combatant, state)}" data-combatant-id="${combatant.id}">
     <button type="button" class="ndi-portrait-main" data-action="claim" data-combatant-id="${combatant.id}" ${canUserClaim(combatant, state) ? "" : "disabled"}>
@@ -187,13 +291,41 @@ function portraitHTML(combatant, state) {
         <img src="${escapeHTML(portraitFor(combatant))}" alt="${escapeHTML(combatantName(combatant))}">
         ${resultBadge}
         ${endedBadge}
+        ${timingBadge}
       </span>
       <span class="ndi-name">${escapeHTML(combatantName(combatant))}</span>
       <span class="ndi-status">${escapeHTML(statusFor(combatant, state))}</span>
     </button>
     <span class="ndi-card-actions">${rollButton}${delayButton}${gmCorrect}</span>
-    <div class="ndi-turn-controls">${turnControls}</div>
+    <div class="ndi-turn-controls">${turnControls}${gmTiming}</div>
   </article>`;
+}
+
+function gmTimingMenuHTML(combatant, state) {
+  const record = state.lifecycle?.timing?.combatants?.[combatant.id];
+  const hasBlock = Boolean(record?.delayBlocked);
+  const hasOverride = Boolean(record?.gmOverride && !record.gmOverride.consumed);
+  const gateActive = Boolean(state.lifecycle?.timing?.priorityGate?.active);
+  const finished = isTurnFinished(state, combatant.id);
+  if (!hasBlock && !hasOverride && !gateActive && !record?.confused) return "";
+
+  let buttons = "";
+  if (hasBlock && state.phase === PHASES.VANGUARD && !finished) {
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-allow-delay" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.AllowDelayOnce"))}">${escapeHTML(t("NDI.Timing.AllowDelayOnce"))}</button>`;
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-move-rearguard" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.MoveToRearguard"))}">${escapeHTML(t("NDI.Timing.MoveToRearguard"))}</button>`;
+  }
+  if (record?.confused && !finished && gateActive) {
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-resolve-priority" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.ResolvePriority"))}">${escapeHTML(t("NDI.Timing.ResolvePriority"))}</button>`;
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-skip-priority" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.SkipPriority"))}">${escapeHTML(t("NDI.Timing.SkipPriority"))}</button>`;
+  }
+  if (gateActive && !record?.confused && !finished) {
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-resume-once" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.ResumeCurrentOnce"))}">${escapeHTML(t("NDI.Timing.ResumeCurrentOnce"))}</button>`;
+  }
+  if (hasOverride) {
+    buttons += `<button type="button" class="ndi-timing-btn" data-action="timing-clear-override" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.ClearOverride"))}">${escapeHTML(t("NDI.Timing.ClearOverride"))}</button>`;
+  }
+  if (!buttons) return "";
+  return `<div class="ndi-timing-menu" aria-label="${escapeHTML(t("NDI.Timing.MenuTitle"))}">${buttons}</div>`;
 }
 
 function initiativeZoneHTML({ label, zone, combatants, state, icon }) {
@@ -406,9 +538,12 @@ function playerActiveControlsHTML(combat, state) {
   const canControl = game.user.isGM || userCanOwnCombatant(game.user, combatant);
   if (!canControl) return "";
   if (isTurnFinished(state, combatant.id)) return "";
-  const delay = state.phase === PHASES.VANGUARD && lifecycleIsOpen(state)
-    ? `<button type="button" data-action="delay" data-combatant-id="${combatant.id}"><i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Delay"))}</button>`
-    : "";
+  let delay = "";
+  if (state.phase === PHASES.VANGUARD && lifecycleIsOpen(state)) {
+    const delayOk = delayEligibilityFor(combatant, state).allowed;
+    const tip = delayTooltip(combatant, state);
+    delay = `<button type="button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(tip)}" ${delayOk ? "" : "disabled aria-disabled=\"true\""}><i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Delay"))}</button>`;
+  }
   const endBtn = canUserEndTurn(combatant, state)
     ? `<button type="button" class="ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}"><i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}</button>`
     : "";
@@ -472,8 +607,8 @@ async function confirmEndCombat() {
   const DialogV2 = foundry?.applications?.api?.DialogV2;
   if (DialogV2?.confirm) {
     return DialogV2.confirm({
-      window: { title: "End Dynamic Initiative" },
-      content: "<p>End this combat encounter?</p>",
+      window: { title: t("NDI.Title") },
+      content: `<p>${escapeHTML(t("NDI.Control.End"))}?</p>`,
       yes: { default: true },
     });
   }
@@ -571,16 +706,54 @@ function bindDockEvents(root, combat, state) {
         await requestAction(REQUESTS.MOVE_REARGUARD, { combatantId: state.activeCombatantId });
         break;
       case "delay":
+        if (target.disabled) break;
         event.stopPropagation();
         await requestAction(REQUESTS.DELAY, { combatantId });
         break;
       case "end-turn":
+        if (target.disabled) break;
         event.stopPropagation();
         await requestAction(REQUESTS.END_TURN, { combatantId });
         break;
       case "reopen-turn":
         event.stopPropagation();
         await requestAction(REQUESTS.REOPEN_TURN, { combatantId });
+        break;
+      case "timing-allow-delay": {
+        event.stopPropagation();
+        const ok = await confirmDialog(t("NDI.Timing.AllowDelayOnce"), t("NDI.Timing.AllowDelayConfirm"));
+        if (ok) await requestAction(REQUESTS.TIMING_ALLOW_DELAY_ONCE, { combatantId, confirmed: true });
+        break;
+      }
+      case "timing-move-rearguard":
+        event.stopPropagation();
+        await requestAction(REQUESTS.TIMING_MOVE_REARGUARD, { combatantId, gmMove: true });
+        break;
+      case "timing-resolve-priority": {
+        event.stopPropagation();
+        const ok = await confirmDialog(t("NDI.Timing.ResolvePriority"), t("NDI.Timing.ResolvePriorityConfirm"));
+        if (ok) await requestAction(REQUESTS.TIMING_RESOLVE_PRIORITY, { combatantId, confirmed: true });
+        break;
+      }
+      case "timing-skip-priority": {
+        event.stopPropagation();
+        const ok = await confirmDialog(t("NDI.Timing.SkipPriority"), t("NDI.Timing.SkipPriorityConfirm"));
+        if (ok) await requestAction(REQUESTS.TIMING_SKIP_PRIORITY, { combatantId, confirmed: true });
+        break;
+      }
+      case "timing-reopen-confused": {
+        event.stopPropagation();
+        const ok = await confirmDialog(t("NDI.Timing.ReopenConfusedTurn"), t("NDI.Timing.ReopenConfusedConfirm"));
+        if (ok) await requestAction(REQUESTS.TIMING_REOPEN_CONFUSED, { combatantId, confirmed: true });
+        break;
+      }
+      case "timing-resume-once":
+        event.stopPropagation();
+        await requestAction(REQUESTS.TIMING_RESUME_CURRENT_ONCE, { combatantId });
+        break;
+      case "timing-clear-override":
+        event.stopPropagation();
+        await requestAction(REQUESTS.TIMING_CLEAR_OVERRIDE, { combatantId });
         break;
       case "toggle-acted":
         event.stopPropagation();
@@ -616,7 +789,7 @@ function createLauncher() {
   const button = document.createElement("button");
   button.id = LAUNCHER_ID;
   button.type = "button";
-  button.innerHTML = '<i class="fa-solid fa-bolt"></i> Dynamic Initiative';
+  button.innerHTML = `<i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Title"))}`;
   button.addEventListener("click", () => requestAction(REQUESTS.START));
   document.body.append(button);
 }

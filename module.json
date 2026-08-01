@@ -1,8 +1,8 @@
 {
   "id": "nel-dynamic-initiative",
-  "title": "Dynamic Initiative",
-  "description": "A portrait-driven, four-phase Dynamic Initiative controller for Pathfinder Second Edition: Initiative, Vanguard, Enemy, and Rearguard.",
-  "version": "0.2.0",
+  "title": "NelTempo",
+  "description": "NelTempo (formerly Dynamic Initiative): a portrait-driven, four-phase initiative controller for Pathfinder Second Edition — Initiative, Vanguard, Enemy, and Rearguard — with condition timing for Grabbed, Restrained, and Confused.",
+  "version": "0.2.1",
   "authors": [
     {
       "name": "Nelson Cruz"

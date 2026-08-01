@@ -1,8 +1,10 @@
-# Dynamic Initiative
+# NelTempo
+
+*Formerly Dynamic Initiative.*
 
 A portrait-driven combat controller for **Foundry VTT 14** and the **Pathfinder Second Edition** system.
 
-Dynamic Initiative replaces a fixed individual initiative order with four encounter phases:
+NelTempo replaces a fixed individual initiative order with four encounter phases:
 
 1. **Initiative** — Players choose a skill and roll against the current Enemy Initiative DC.
 2. **Vanguard** — Successful PCs act in any order.
@@ -11,7 +13,7 @@ Dynamic Initiative replaces a fixed individual initiative order with four encoun
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.2.0  
+**Current version:** 0.2.1  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.3.0, Forge VTT hosting
 
@@ -23,15 +25,15 @@ At the end of Rearguard, the GM changes to Initiative. The round advances, globa
 2. Place the extracted folder in Foundry's `Data/modules` directory so that `module.json` is at `Data/modules/<folder>/module.json`.
 3. Restart Foundry if it was running.
 4. Open **Manage Modules** for the world.
-5. Enable **Dynamic Initiative**.
+5. Enable **NelTempo**.
 6. Disable **Combat Carousel** for this world so the top-center portrait space is available.
 
 ## Starting an encounter
 
 There are three supported workflows:
 
-- Add tokens to Foundry's normal Combat Tracker, then click **Start Dynamic Initiative**.
-- Select tokens on the canvas and click the top-center **Dynamic Initiative** launcher; the module creates an encounter from the selected tokens.
+- Add tokens to Foundry's normal Combat Tracker, then click **Start NelTempo**.
+- Select tokens on the canvas and click the top-center **NelTempo** launcher; the module creates an encounter from the selected tokens.
 - Run this macro as a GM:
 
 ```js
@@ -63,7 +65,7 @@ game.dynamicInitiative.start();
 - Before the phase ends, you can **Reopen Turn** if you need to act again.
 - A Vanguard character can use **Delay to Rearguard**.
 
-## Phase lifecycle (0.2.0)
+## Phase lifecycle (0.2.0+)
 
 When the GM advances into Vanguard, Enemy, or Rearguard:
 
@@ -71,6 +73,16 @@ When the GM advances into Vanguard, Enemy, or Rearguard:
 2. Players act freely; each uses **End Turn** when done.
 3. When everyone is finished, the dock shows **Phase Complete**.
 4. The GM advances (or uses automatic advance). The module runs native PF2e **end-of-turn** once per combatant, then opens the next phase.
+
+## Condition timing (0.2.1)
+
+When **Enforce Condition Timing** is on (default):
+
+- **Grabbed** and **Restrained** block voluntary **Delay to Rearguard** during Vanguard.
+- **Confused** combatants must End Turn before others in the same open phase (deterministic roster order).
+- GMs can grant one-shot overrides (Allow Delay Once, Move to Rearguard, Resolve/Skip Priority, Reopen Confused, Resume Current Once, Clear Override).
+
+Condition detection uses structured PF2e slugs only (`grabbed`, `restrained`, `confused`); failed reads fail open. See `docs/SLICE_0_2_1_CONDITION_TIMING.md`.
 
 ## Settings
 
@@ -82,11 +94,12 @@ When the GM advances into Vanguard, Enemy, or Rearguard:
 | Automatically Open Initiative Prompts | Client | true | Auto-open skill prompts when the GM prompts |
 | Minimum Opposition for Raise a Shield | World | true | Manage Raise a Shield until end of next Enemy phase |
 | Advance Completed Phases Automatically | World | Off | Off / Prompt GM / Automatic when all turns end |
-| Dynamic Initiative Debug Logging | Client | false | Concise state diagnostics in the browser console |
+| Enforce Condition Timing | World | true | Grabbed/Restrained delay block and Confused priority gate |
+| NelTempo Debug Logging | Client | false | Concise state diagnostics in the browser console |
 
 ### Debug logging
 
-When **Dynamic Initiative Debug Logging** is enabled, the console receives short events such as:
+When **NelTempo Debug Logging** is enabled, the console receives short events such as:
 
 - `state-normalized`, `state-update-queued`, `state-update-started`, `state-update-complete`
 - `state-update-stale`, `state-update-failed`
@@ -98,7 +111,7 @@ Logged fields are limited to shortened combat ids, phase slugs, revision numbers
 
 ## Raise a Shield: minimum opposition
 
-While Dynamic Initiative is active, newly created **Raise a Shield** effects are changed to unlimited duration and tracked by the module. They are removed at the end of the next applicable Enemy phase.
+While NelTempo is active, newly created **Raise a Shield** effects are changed to unlimited duration and tracked by the module. They are removed at the end of the next applicable Enemy phase.
 
 - Raised in Vanguard: expires at the end of the upcoming Enemy phase.
 - Raised in Rearguard or Initiative: expires at the end of the next Enemy phase.
@@ -152,9 +165,9 @@ Creates `dist/dynamic-initiative.zip` with `module.json` at the ZIP root, runtim
 | Stale combatant results after removal | 0.1.5 replaces the full module state object each write and prunes missing combatant ids. |
 | Undo after removing a combatant | Undo restores gameplay fields but does not recreate deleted combatants. |
 
-## Known third-party noise (not Dynamic Initiative)
+## Known third-party noise (not NelTempo)
 
-Unrelated console errors observed during playtests should not be treated as Dynamic Initiative failures:
+Unrelated console errors observed during playtests should not be treated as NelTempo failures:
 
 - Monk’s Combat Details — `CONFIG.statusEffects.find is not a function`
 - Pathfinder 2e Action Macros — actor-sheet render errors
@@ -162,7 +175,7 @@ Unrelated console errors observed during playtests should not be treated as Dyna
 - PF2e Sustain Reminder — deprecated `renderTemplate` usage
 - ForgeVTT host scripts — `setProperty is not defined` in some host contexts
 
-Dynamic Initiative fails independently and logs its own concise errors.
+NelTempo fails independently and logs its own concise errors.
 
 ## GM macro API
 
@@ -180,17 +193,20 @@ game.dynamicInitiative.end();
 ## Documentation
 
 - `docs/ARCHITECTURE.md` — state ownership, normalization, persistence
+- `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` — phase lifecycle (0.2.0)
+- `docs/SLICE_0_2_1_CONDITION_TIMING.md` — condition timing (0.2.1)
 - `docs/MAINTENANCE_V14_STATE_REPAIR.md` — V14 repair notes
 - `docs/TEST_PLAN.md` — static, mocked, and runtime test plan
+- `docs/SLICE_0_2_1_TEST_PLAN.md` — 0.2.1 timing verification
 - `FORGE_INSTALL.md` — Forge and manual installation notes
 - `PLAYTEST_CHECKLIST.md` — focused first-session validation checklist
 - `CHANGELOG.md` — release history
 
-## Current limitations in v0.1.5
+## Current limitations
 
-- Dynamic Initiative does not judge whether a player's chosen initiative skill is narratively appropriate.
+- NelTempo does not judge whether a player's chosen initiative skill is narratively appropriate.
 - Opening initiative automation from every possible third-party module cannot be guaranteed.
 - Minimum-opposition shield timing recognizes PF2e effects whose slug or name matches **Raise a Shield**.
 - Friendly NPCs are classified as party-side if they have player ownership, party alliance, or friendly token disposition. Other NPCs are treated as enemies.
-- The module is designed to coexist with PF2e Workbench, but the first live-world test should be performed in a copied world or after a backup.
-- This maintenance release intentionally does **not** add phase-lifecycle automation, automatic phase advancement, Grabbed/Restrained/Confused timing, or new initiative rules.
+- Condition timing does not automate Confused target selection, Grapple duration, or Escape actions (see slice doc for deferred work).
+- The module is designed to coexist with PF2e Workbench; first live-world tests should use a copied world or backup.

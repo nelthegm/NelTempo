@@ -1,5 +1,11 @@
 import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
-import { reconcileLifecycleOnReady, requestAction, socketHandler } from "./controller.js";
+import {
+  reconcileLifecycleOnReady,
+  reconcileTimingFromConditionHook,
+  requestAction,
+  socketHandler,
+} from "./controller.js";
+import { isTrackedConditionItem } from "./pf2e-condition-adapter.js";
 import { registerRaisedShield } from "./shields.js";
 import { handleInitiativePrompt, removeUI, renderDock, syncNativeCombatTracker } from "./ui.js";
 import { debug, getCombat, getState } from "./utils.js";
@@ -7,7 +13,7 @@ import { debug, getCombat, getState } from "./utils.js";
 function registerSettings() {
   game.settings.register(MODULE_ID, SETTINGS.PORTRAIT_SIZE, {
     name: "Portrait Size",
-    hint: "Height of combatant portraits in the Dynamic Initiative dock.",
+    hint: "Height of combatant portraits in the NelTempo dock.",
     scope: "client",
     config: true,
     type: Number,
@@ -40,7 +46,7 @@ function registerSettings() {
 
   game.settings.register(MODULE_ID, SETTINGS.AUTO_OPEN_PROMPTS, {
     name: "Automatically Open Initiative Prompts",
-    hint: "Open the Dynamic Initiative skill prompt automatically when the GM requests checks.",
+    hint: "Open the NelTempo skill prompt automatically when the GM requests checks.",
     scope: "client",
     config: true,
     type: Boolean,
@@ -72,9 +78,22 @@ function registerSettings() {
     restricted: true,
   });
 
+  // Default true; Foundry resolves missing world values to the registered default
+  // without writing a migration for existing worlds.
+  game.settings.register(MODULE_ID, SETTINGS.ENFORCE_CONDITION_TIMING, {
+    name: "NDI.Setting.EnforceConditionTiming.Name",
+    hint: "NDI.Setting.EnforceConditionTiming.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    restricted: true,
+    onChange: renderDock,
+  });
+
   game.settings.register(MODULE_ID, SETTINGS.DEBUG, {
-    name: "Dynamic Initiative Debug Logging",
-    hint: "Write concise Dynamic Initiative state diagnostics to the browser console (combat id, phase, revision, counts). No actor or token names.",
+    name: "NelTempo Debug Logging",
+    hint: "Write concise NelTempo state diagnostics to the browser console (combat id, phase, revision, counts). No actor or token names.",
     scope: "client",
     config: true,
     type: Boolean,
@@ -94,9 +113,17 @@ function addTrackerLauncher(_app, html) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "ndi-tracker-launch";
-  button.innerHTML = '<i class="fa-solid fa-bolt"></i> Start Dynamic Initiative';
+  button.innerHTML = `<i class="fa-solid fa-bolt"></i> Start ${MODULE_TITLE}`;
   button.addEventListener("click", () => requestAction(REQUESTS.START));
   root.prepend(button);
+}
+
+function queueConditionTimingReconcile(item) {
+  if (!isTrackedConditionItem(item)) return;
+  queueMicrotask(() => {
+    void reconcileTimingFromConditionHook(item);
+    renderDock();
+  });
 }
 
 Hooks.once("init", () => {
@@ -106,7 +133,7 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   if (game.system.id !== "pf2e") {
-    ui.notifications.error("Dynamic Initiative requires the Pathfinder Second Edition system.");
+    ui.notifications.error("NelTempo requires the Pathfinder Second Edition system.");
     return;
   }
 
@@ -142,9 +169,16 @@ for (const hook of [
 
 Hooks.on("deleteCombat", () => removeUI());
 Hooks.on("renderCombatTracker", addTrackerLauncher);
-Hooks.on("createItem", (item) => void registerRaisedShield(item));
+Hooks.on("createItem", (item) => {
+  void registerRaisedShield(item);
+  queueConditionTimingReconcile(item);
+});
 Hooks.on("updateItem", (item, changes, options) => {
   if (!options?.[`${MODULE_ID}.shieldManagement`]) void registerRaisedShield(item);
+  queueConditionTimingReconcile(item);
   queueMicrotask(renderDock);
 });
-Hooks.on("deleteItem", () => queueMicrotask(renderDock));
+Hooks.on("deleteItem", (item) => {
+  queueConditionTimingReconcile(item);
+  queueMicrotask(renderDock);
+});

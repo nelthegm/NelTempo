@@ -42,6 +42,26 @@ import {
 import { adapterReasonMessage, processEndTurn, processStartTurn } from "./pf2e-lifecycle-adapter.js";
 import { clearManagedRaisedShields, expireDueRaisedShields } from "./shields.js";
 import {
+  applyEndTurnTiming,
+  applyReopenTiming,
+  isTimingEnforced,
+  reconcileTimingState,
+  refreshCombatantTiming,
+} from "./timing-service.js";
+import {
+  TIMING_OVERRIDE,
+  consumeTimingOverride,
+  clearTimingOverride,
+  evaluateDelayEligibility,
+  evaluateEndTurnEligibility,
+  evaluateReopenEligibility,
+  grantTimingOverride,
+  markPriorityResolved,
+  pushTimingAudit,
+  recomputePriorityGate,
+  ensureTiming,
+} from "./timing.js";
+import {
   activePlayerOwners,
   clearNativeTurn,
   combatantIdList,
@@ -72,7 +92,22 @@ const phaseTransitionLocks = new Map();
 const autoAdvancePrompted = new Set();
 
 function publicChat(content) {
-  return ChatMessage.create({ content, speaker: { alias: "Dynamic Initiative" } });
+  return ChatMessage.create({ content, speaker: { alias: "NelTempo" } });
+}
+
+function delayBlockMessage(blockReason) {
+  if (blockReason === "confused") return localize("NDI.Timing.CannotDelayConfused");
+  if (blockReason === "restrained") return localize("NDI.Timing.CannotDelayRestrained");
+  if (blockReason === "grabbed") return localize("NDI.Timing.CannotDelayGrabbed");
+  return localize("NDI.Timing.DelayBlocked");
+}
+
+function endTurnRejectMessage(reason) {
+  if (reason === "waiting-for-confused") return localize("NDI.Timing.ResolveConfusedFirst");
+  if (reason === "waiting-for-priority-combatant") return localize("NDI.Timing.WaitingForPriority");
+  if (reason === "priority-order-changed") return localize("NDI.Timing.PriorityOrderChanged");
+  if (reason === "combatant-not-current-priority") return localize("NDI.Timing.WaitingForPriority");
+  return localize("NDI.Lifecycle.CannotEndTurn");
 }
 
 function defaultEnemyDC(combat) {
@@ -271,8 +306,17 @@ async function runStartBoundary(combat, state, { onlyFailedOrInterrupted = false
   }
 
   next = completeStartBoundary(next, { error: false });
+  // Build condition timing / Confused priority once the phase is Open.
+  const reconciled = reconcileTimingState(combat, next, { reason: "phase-open" });
+  next = reconciled.state;
   await persistState(combat, next, "phase-open");
-  lifecycleDiag("phase-open", combat, next);
+  lifecycleDiag("phase-open", combat, next, {
+    timingGate: Boolean(next.lifecycle?.timing?.priorityGate?.active),
+    adapterFailures: reconciled.adapterFailures,
+  });
+  if (reconciled.adapterFailures > 0) {
+    notify("warn", localize("NDI.Timing.AdapterWarning"));
+  }
   return next;
 }
 
@@ -680,38 +724,82 @@ async function endTurn(combat, state, payload, requestUser) {
 
   // Lifecycle phases: End Turn only marks finished — never native end processing.
   if (isLifecyclePhase(state.phase) && state.lifecycle) {
-    if (!canEndTurn(state.lifecycle, combatant.id) && isTurnEnded(state, combatant.id)) {
-      // Idempotent: already ended.
-      lifecycleDiag("end-turn-complete", combat, state, {
+    // Re-read authoritative combat/lifecycle before priority validation.
+    let liveState = getState(combat) ?? state;
+    liveState = refreshCombatantTiming(combat, liveState, combatant.id);
+
+    if (!canEndTurn(liveState.lifecycle, combatant.id) && isTurnEnded(liveState, combatant.id)) {
+      lifecycleDiag("end-turn-complete", combat, liveState, {
         combatantId: shortId(combatant.id),
         reason: "already-ended",
       });
       return;
     }
-    if (!canEndTurn(state.lifecycle, combatant.id)) {
+    if (!canEndTurn(liveState.lifecycle, combatant.id)) {
       throw new Error(localize("NDI.Lifecycle.CannotEndTurn"));
     }
 
-    lifecycleDiag("end-turn-requested", combat, state, {
+    const enforce = isTimingEnforced();
+    const eligibility = evaluateEndTurnEligibility(liveState.lifecycle, combatant.id, { enforce });
+    if (!eligibility.allowed) {
+      lifecycleDiag("priority-end-turn-rejected", combat, liveState, {
+        combatantId: shortId(combatant.id),
+        reason: eligibility.reason,
+      });
+      if (liveState.lifecycle?.timing) {
+        liveState = structuredClone(liveState);
+        liveState.lifecycle.timing = pushTimingAudit(
+          liveState.lifecycle.timing,
+          eligibility.reason === "waiting-for-confused"
+            ? "nonpriority-end-turn-rejected"
+            : "priority-end-turn-rejected",
+          {
+            combatantId: shortId(combatant.id),
+            phase: liveState.lifecycle.phase,
+            phaseInstanceId: shortId(liveState.lifecycle.phaseInstanceId),
+            reason: eligibility.reason,
+            userId: shortId(requestUser.id),
+          },
+        );
+        await persistState(combat, liveState, "end-turn-rejected");
+      }
+      throw new Error(endTurnRejectMessage(eligibility.reason));
+    }
+
+    lifecycleDiag("end-turn-requested", combat, liveState, {
       combatantId: shortId(combatant.id),
       userId: shortId(requestUser.id),
     });
 
-    const marked = markTurnEnded(withHistory(state, `End turn ${combatant.id}`), combatant.id, {
+    const marked = markTurnEnded(withHistory(liveState, `End turn ${combatant.id}`), combatant.id, {
       userId: requestUser.id,
     });
     if (!marked.changed) {
       return;
     }
-    await persistState(combat, marked.state, "end-turn");
+    let next = applyEndTurnTiming(marked.state, combatant.id);
+    if (eligibility.overrideType === TIMING_OVERRIDE.RESUME_CURRENT_ONCE) {
+      const consumed = consumeTimingOverride(
+        next.lifecycle.timing,
+        combatant.id,
+        TIMING_OVERRIDE.RESUME_CURRENT_ONCE,
+      );
+      next.lifecycle.timing = consumed.timing;
+      next.lifecycle.timing = pushTimingAudit(next.lifecycle.timing, "current-actor-resume-granted", {
+        combatantId: shortId(combatant.id),
+        reason: "consumed",
+        phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
+      });
+    }
+    await persistState(combat, next, "end-turn");
     await clearNativeTurn(combat);
-    lifecycleDiag("end-turn-complete", combat, marked.state, {
+    lifecycleDiag("end-turn-complete", combat, next, {
       combatantId: shortId(combatant.id),
     });
 
-    if (marked.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
-      lifecycleDiag("phase-complete", combat, marked.state);
-      await maybeAutoAdvance(combat, marked.state);
+    if (next.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+      lifecycleDiag("phase-complete", combat, next);
+      await maybeAutoAdvance(combat, next);
     }
     return;
   }
@@ -728,14 +816,51 @@ async function reopenCombatantTurn(combat, state, payload, requestUser) {
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
     throw new Error(localize("NDI.Error.NotOwner"));
   }
-  if (!canReopenTurn(state.lifecycle, combatant.id)) {
+
+  let liveState = refreshCombatantTiming(combat, getState(combat) ?? state, combatant.id);
+  if (!canReopenTurn(liveState.lifecycle, combatant.id)) {
     throw new Error(localize("NDI.Lifecycle.CannotReopen"));
   }
 
-  const result = reopenTurn(withHistory(state, `Reopen turn ${combatant.id}`), combatant.id);
+  const enforce = isTimingEnforced();
+  const eligibility = evaluateReopenEligibility(liveState.lifecycle, combatant.id, {
+    isGM: requestUser.isGM,
+    enforce,
+  });
+  if (!eligibility.allowed) {
+    if (liveState.lifecycle?.timing) {
+      liveState = structuredClone(liveState);
+      liveState.lifecycle.timing = pushTimingAudit(
+        liveState.lifecycle.timing,
+        "confused-reopen-rejected",
+        {
+          combatantId: shortId(combatant.id),
+          phaseInstanceId: shortId(liveState.lifecycle.phaseInstanceId),
+          userId: shortId(requestUser.id),
+        },
+      );
+      await persistState(combat, liveState, "reopen-rejected");
+    }
+    throw new Error(localize("NDI.Timing.ConfusedReopenRejected"));
+  }
+
+  // GM reopening a Confused turn requires the dedicated override path (or confirmation flag).
+  if (eligibility.requiresOverride && requestUser.isGM && !payload.timingOverrideConfirmed) {
+    throw new Error(localize("NDI.Timing.UseReopenConfusedControl"));
+  }
+
+  const result = reopenTurn(withHistory(liveState, `Reopen turn ${combatant.id}`), combatant.id);
   if (!result.changed) return;
-  await persistState(combat, result.state, "reopen-turn");
-  lifecycleDiag("turn-reopened", combat, result.state, {
+  let next = applyReopenTiming(result.state, combatant.id);
+  if (eligibility.requiresOverride) {
+    next.lifecycle.timing = pushTimingAudit(next.lifecycle.timing, "confused-reopen-overridden", {
+      combatantId: shortId(combatant.id),
+      phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
+      userId: shortId(requestUser.id),
+    });
+  }
+  await persistState(combat, next, "reopen-turn");
+  lifecycleDiag("turn-reopened", combat, next, {
     combatantId: shortId(combatant.id),
   });
 }
@@ -894,8 +1019,83 @@ async function delayCombatant(combat, state, payload, requestUser) {
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
     throw new Error(localize("NDI.Error.NotOwner"));
   }
+
+  const isGmMove = payload.type === REQUESTS.MOVE_REARGUARD || payload.gmMove === true;
+  if (isGmMove && !requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+
+  // Re-read combat / lifecycle / live conditions before voluntary Delay.
+  let liveState = refreshCombatantTiming(combat, getState(combat) ?? state, combatant.id);
+  const enforce = isTimingEnforced();
+
+  if (!isGmMove) {
+    const eligibility = evaluateDelayEligibility(liveState.lifecycle, combatant.id, { enforce });
+    if (!eligibility.allowed) {
+      if (liveState.lifecycle?.timing) {
+        liveState = structuredClone(liveState);
+        const event =
+          eligibility.blockReason === "confused"
+            ? "delay-blocked-confused"
+            : eligibility.blockReason === "restrained"
+              ? "delay-blocked-restrained"
+              : "delay-blocked-grabbed";
+        liveState.lifecycle.timing = pushTimingAudit(liveState.lifecycle.timing, event, {
+          combatantId: shortId(combatant.id),
+          phase: liveState.lifecycle.phase,
+          phaseInstanceId: shortId(liveState.lifecycle.phaseInstanceId),
+          restriction: eligibility.blockReason,
+          userId: shortId(requestUser.id),
+        });
+        await persistState(combat, liveState, "delay-blocked");
+      }
+      throw new Error(delayBlockMessage(eligibility.blockReason));
+    }
+
+    // Consume Allow Delay Once after validation, before mutation.
+    if (eligibility.overrideType === TIMING_OVERRIDE.ALLOW_DELAY_ONCE) {
+      const consumed = consumeTimingOverride(
+        liveState.lifecycle.timing,
+        combatant.id,
+        TIMING_OVERRIDE.ALLOW_DELAY_ONCE,
+      );
+      if (!consumed.consumed) {
+        throw new Error(delayBlockMessage(eligibility.blockReason));
+      }
+      liveState = structuredClone(liveState);
+      liveState.lifecycle.timing = pushTimingAudit(consumed.timing, "delay-override-consumed", {
+        combatantId: shortId(combatant.id),
+        overrideType: TIMING_OVERRIDE.ALLOW_DELAY_ONCE,
+        phaseInstanceId: shortId(liveState.lifecycle.phaseInstanceId),
+      });
+    }
+  } else if (liveState.lifecycle?.timing) {
+    liveState = structuredClone(liveState);
+    liveState.lifecycle.timing = grantTimingOverride(
+      liveState.lifecycle.timing,
+      combatant.id,
+      TIMING_OVERRIDE.MOVE_REARGUARD,
+      { grantedBy: requestUser.id },
+    );
+    const consumed = consumeTimingOverride(
+      liveState.lifecycle.timing,
+      combatant.id,
+      TIMING_OVERRIDE.MOVE_REARGUARD,
+    );
+    liveState.lifecycle.timing = pushTimingAudit(consumed.timing, "delay-override-consumed", {
+      combatantId: shortId(combatant.id),
+      overrideType: TIMING_OVERRIDE.MOVE_REARGUARD,
+      phaseInstanceId: shortId(liveState.lifecycle.phaseInstanceId),
+    });
+  }
+
   // Delay removes them from Vanguard play; mark ended/skipped in lifecycle so phase can complete.
-  let next = delayToRearguard(state, combatant.id);
+  let next = delayToRearguard(liveState, combatant.id);
+  if (next.lifecycle?.timing) {
+    next.lifecycle.timing = pushTimingAudit(next.lifecycle.timing, "delay-allowed", {
+      combatantId: shortId(combatant.id),
+      phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
+      reason: isGmMove ? "gm-move" : "voluntary",
+    });
+  }
   if (next.lifecycle?.roster?.includes(combatant.id)) {
     const turn = next.lifecycle.turns?.[combatant.id];
     if (turn && !turn.ended) {
@@ -915,6 +1115,11 @@ async function delayCombatant(combat, state, payload, requestUser) {
     const progress = lifecycleProgress(next.lifecycle, { combatantIds: combatantIdList(combat) });
     if (progress.complete && next.lifecycle.status === LIFECYCLE_STATUS.OPEN) {
       next.lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
+    }
+    // Remove delayed combatant from Confused priority gate.
+    if (next.lifecycle.timing) {
+      next.lifecycle.timing = markPriorityResolved(next.lifecycle.timing, combatant.id);
+      next.lifecycle.timing = recomputePriorityGate(next.lifecycle.timing, next.lifecycle);
     }
   }
   await persistState(combat, next, "delay-rearguard");
@@ -1015,6 +1220,178 @@ async function endDynamicCombat(combat, state) {
   await combat.delete();
 }
 
+/* -------------------------------------------- */
+/*  GM timing overrides                         */
+/* -------------------------------------------- */
+
+async function requireOpenLifecycle(combat, state) {
+  const live = structuredClone(getState(combat) ?? state);
+  if (!live?.lifecycle || live.lifecycle.status !== LIFECYCLE_STATUS.OPEN) {
+    throw new Error(localize("NDI.Lifecycle.NotOpen"));
+  }
+  live.lifecycle.timing = ensureTiming(live.lifecycle);
+  return live;
+}
+
+async function timingAllowDelayOnce(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  let live = await requireOpenLifecycle(combat, state);
+  live = refreshCombatantTiming(combat, live, combatant.id);
+  const record = live.lifecycle.timing.combatants?.[combatant.id];
+  const needsConfirm =
+    record?.delayBlockReason === "restrained" || record?.delayBlockReason === "confused";
+  if (needsConfirm && !payload.confirmed) {
+    throw new Error(localize("NDI.Timing.OverrideNeedsConfirm"));
+  }
+  live = structuredClone(live);
+  live.lifecycle.timing = grantTimingOverride(
+    live.lifecycle.timing,
+    combatant.id,
+    TIMING_OVERRIDE.ALLOW_DELAY_ONCE,
+    { grantedBy: requestUser.id },
+  );
+  live.lifecycle.timing = pushTimingAudit(live.lifecycle.timing, "delay-override-granted", {
+    combatantId: shortId(combatant.id),
+    overrideType: TIMING_OVERRIDE.ALLOW_DELAY_ONCE,
+    phaseInstanceId: shortId(live.lifecycle.phaseInstanceId),
+    userId: shortId(requestUser.id),
+  });
+  await persistState(combat, withHistory(live, `Allow delay once ${combatant.id}`), "timing-allow-delay");
+  notify("info", localize("NDI.Timing.AllowDelayOnceGranted"));
+}
+
+async function timingResolvePriority(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  if (!payload.confirmed) throw new Error(localize("NDI.Timing.OverrideNeedsConfirm"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  let live = await requireOpenLifecycle(combat, state);
+  live = structuredClone(live);
+  live.lifecycle.timing = markPriorityResolved(live.lifecycle.timing, combatant.id);
+  live.lifecycle.timing = recomputePriorityGate(live.lifecycle.timing, live.lifecycle);
+  live.lifecycle.timing = pushTimingAudit(live.lifecycle.timing, "confused-priority-resolved", {
+    combatantId: shortId(combatant.id),
+    reason: "gm-resolve-priority",
+    phaseInstanceId: shortId(live.lifecycle.phaseInstanceId),
+    userId: shortId(requestUser.id),
+  });
+  await persistState(combat, withHistory(live, `Resolve priority ${combatant.id}`), "timing-resolve-priority");
+}
+
+async function timingSkipPriority(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  if (!payload.confirmed) throw new Error(localize("NDI.Timing.OverrideNeedsConfirm"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  let live = await requireOpenLifecycle(combat, state);
+  live = structuredClone(live);
+  live.lifecycle.timing = grantTimingOverride(
+    live.lifecycle.timing,
+    combatant.id,
+    TIMING_OVERRIDE.SKIP_PRIORITY,
+    { grantedBy: requestUser.id },
+  );
+  // Leave override unconsumed so the combatant stays exempt from the gate this phase.
+  live.lifecycle.timing = recomputePriorityGate(live.lifecycle.timing, live.lifecycle);
+  live.lifecycle.timing = pushTimingAudit(live.lifecycle.timing, "confused-priority-advanced", {
+    combatantId: shortId(combatant.id),
+    reason: "gm-skip-priority",
+    phaseInstanceId: shortId(live.lifecycle.phaseInstanceId),
+    userId: shortId(requestUser.id),
+  });
+  await persistState(combat, withHistory(live, `Skip priority ${combatant.id}`), "timing-skip-priority");
+}
+
+async function timingReopenConfused(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  if (!payload.confirmed) throw new Error(localize("NDI.Timing.OverrideNeedsConfirm"));
+  return reopenCombatantTurn(
+    combat,
+    state,
+    { ...payload, timingOverrideConfirmed: true },
+    requestUser,
+  );
+}
+
+async function timingResumeCurrentOnce(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  let live = await requireOpenLifecycle(combat, state);
+  live = structuredClone(live);
+  live.lifecycle.timing = grantTimingOverride(
+    live.lifecycle.timing,
+    combatant.id,
+    TIMING_OVERRIDE.RESUME_CURRENT_ONCE,
+    { grantedBy: requestUser.id },
+  );
+  live.lifecycle.timing = pushTimingAudit(live.lifecycle.timing, "current-actor-resume-granted", {
+    combatantId: shortId(combatant.id),
+    phaseInstanceId: shortId(live.lifecycle.phaseInstanceId),
+    userId: shortId(requestUser.id),
+  });
+  await persistState(combat, withHistory(live, `Resume once ${combatant.id}`), "timing-resume-once");
+  notify("info", localize("NDI.Timing.ResumeGranted"));
+}
+
+async function timingClearOverride(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  let live = await requireOpenLifecycle(combat, state);
+  live = structuredClone(live);
+  live.lifecycle.timing = clearTimingOverride(live.lifecycle.timing, combatant.id);
+  live.lifecycle.timing = pushTimingAudit(live.lifecycle.timing, "timing-override-cleared", {
+    combatantId: shortId(combatant.id),
+    phaseInstanceId: shortId(live.lifecycle.phaseInstanceId),
+    userId: shortId(requestUser.id),
+  });
+  await persistState(combat, withHistory(live, `Clear timing override ${combatant.id}`), "timing-clear-override");
+}
+
+async function timingReconcileRequest(combat, state, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const live = getState(combat) ?? state;
+  const result = reconcileTimingState(combat, live, { reason: "gm-reconcile" });
+  if (result.changed) {
+    await persistState(combat, result.state, "timing-reconcile");
+  }
+  if (result.adapterFailures > 0) {
+    notify("warn", localize("NDI.Timing.AdapterWarning"));
+  }
+}
+
+/**
+ * Authoritative GM reconciliation after a condition item change.
+ * Serialized through the combat mutation queue.
+ */
+export async function reconcileTimingFromConditionHook(item) {
+  if (!isPrimaryGM()) return;
+  if (!isTimingEnforced()) return;
+  const actor = item?.actor;
+  if (!actor) return;
+  const combat = getCombat();
+  const state = getState(combat);
+  if (!combat || !state?.enabled || !state.lifecycle) return;
+  if (state.lifecycle.status !== LIFECYCLE_STATUS.OPEN) {
+    // Preserve interrupted/manual-review; do not activate timing controls.
+    return;
+  }
+  const affected = [...combat.combatants].some((c) => c.actor?.id === actor.id);
+  if (!affected) return;
+
+  return runCombatMutation(combat.id, async () => {
+    const live = getState(combat);
+    if (!live?.enabled || live.lifecycle?.status !== LIFECYCLE_STATUS.OPEN) return;
+    const result = reconcileTimingState(combat, live, { reason: "condition-hook" });
+    if (result.changed) {
+      await persistState(combat, result.state, "timing-condition-reconcile");
+    }
+  });
+}
+
 async function dispatchGMRequest(payload) {
   const requestUser = validateRequestUser(payload);
   if (payload.type === REQUESTS.START) return await startDynamicInitiative();
@@ -1073,8 +1450,29 @@ async function dispatchGMRequest(payload) {
     case REQUESTS.END_COMBAT:
       if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await endDynamicCombat(combat, state);
+    case REQUESTS.TIMING_ALLOW_DELAY_ONCE:
+      return await timingAllowDelayOnce(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_MOVE_REARGUARD:
+      return await delayCombatant(
+        combat,
+        state,
+        { ...payload, type: REQUESTS.MOVE_REARGUARD, gmMove: true },
+        requestUser,
+      );
+    case REQUESTS.TIMING_RESOLVE_PRIORITY:
+      return await timingResolvePriority(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_SKIP_PRIORITY:
+      return await timingSkipPriority(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_REOPEN_CONFUSED:
+      return await timingReopenConfused(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_RESUME_CURRENT_ONCE:
+      return await timingResumeCurrentOnce(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_CLEAR_OVERRIDE:
+      return await timingClearOverride(combat, state, payload, requestUser);
+    case REQUESTS.TIMING_RECONCILE:
+      return await timingReconcileRequest(combat, state, requestUser);
     default:
-      throw new Error(`Unknown Dynamic Initiative request: ${payload.type}`);
+      throw new Error(`Unknown NelTempo request: ${payload.type}`);
   }
 }
 
@@ -1091,7 +1489,7 @@ export async function handleGMRequest(payload) {
         combatId: shortId(payload?.combatId),
         reason: error?.message ?? "request-failed",
       });
-      notify("error", error.message ?? "Dynamic Initiative request failed.");
+      notify("error", error.message ?? "NelTempo request failed.");
     }
   });
 }
@@ -1122,7 +1520,8 @@ export function partyRollRecipients(combat) {
 }
 
 /**
- * On ready/reload: convert uncertain Processing lifecycle entries to interrupted.
+ * On ready/reload: convert uncertain Processing lifecycle entries to interrupted,
+ * then reconcile live condition timing without replaying boundaries.
  */
 export async function reconcileLifecycleOnReady() {
   if (!isPrimaryGM()) return;
@@ -1138,12 +1537,22 @@ export async function reconcileLifecycleOnReady() {
         t.startStatus === BOUNDARY_STATUS.PROCESSING || t.endStatus === BOUNDARY_STATUS.PROCESSING,
     );
 
-  if (!uncertain) return;
+  if (uncertain) {
+    const { interruptUncertainProcessing } = await import("./lifecycle.js");
+    const next = structuredClone(state);
+    next.lifecycle = interruptUncertainProcessing(next.lifecycle);
+    await persistState(combat, next, "lifecycle-restored");
+    lifecycleDiag("lifecycle-restored", combat, next, { reason: "reload-interrupt" });
+    notify("warn", localize("NDI.Lifecycle.Interrupted"));
+    return;
+  }
 
-  const { interruptUncertainProcessing } = await import("./lifecycle.js");
-  const next = structuredClone(state);
-  next.lifecycle = interruptUncertainProcessing(next.lifecycle);
-  await persistState(combat, next, "lifecycle-restored");
-  lifecycleDiag("lifecycle-restored", combat, next, { reason: "reload-interrupt" });
-  notify("warn", localize("NDI.Lifecycle.Interrupted"));
+  // Open phase: recompute live conditions, restore badges/overrides, no boundary replay.
+  if (lc.status === LIFECYCLE_STATUS.OPEN || lc.status === LIFECYCLE_STATUS.COMPLETE) {
+    const result = reconcileTimingState(combat, state, { reason: "reload" });
+    if (result.changed) {
+      await persistState(combat, result.state, "timing-reload-reconcile");
+      lifecycleDiag("timing-state-reconciled", combat, result.state, { reason: "reload" });
+    }
+  }
 }

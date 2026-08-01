@@ -19,8 +19,8 @@ function read(rel) {
 // 1. module.json valid JSON
 const moduleJson = JSON.parse(read("module.json"));
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
-assert.equal(moduleJson.title, "Dynamic Initiative");
-assert.equal(moduleJson.version, "0.2.0");
+assert.equal(moduleJson.title, "NelTempo");
+assert.equal(moduleJson.version, "0.2.1");
 assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
 
@@ -130,7 +130,7 @@ assert.equal(REQUESTS.START, "start");
 
 // 10. Debug setting registration is client-scoped in source
 const mainSource = read("scripts/main.js");
-assert.ok(mainSource.includes("Dynamic Initiative Debug Logging"));
+assert.ok(mainSource.includes("NelTempo Debug Logging"));
 assert.ok(mainSource.includes('scope: "client"'));
 assert.ok(mainSource.includes("default: false"));
 

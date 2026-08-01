@@ -1,8 +1,10 @@
 /**
- * Pure phase-lifecycle state helpers for Dynamic Initiative.
+ * Pure phase-lifecycle state helpers for NelTempo (formerly Dynamic Initiative).
  * No Foundry/PF2e document access; safe for unit tests.
  * Intentionally does not import state.js (avoids circular deps).
  */
+
+import { createTiming, normalizeTiming } from "./timing.js";
 
 export const LIFECYCLE_STATUS = Object.freeze({
   PREPARING: "preparing",
@@ -89,8 +91,9 @@ export function createLifecycle({ phase, round, roster, phaseInstanceId = null }
   const turns = {};
   for (const id of ids) turns[id] = emptyTurnRecord();
 
+  const instanceId = phaseInstanceId || createPhaseInstanceId();
   return {
-    phaseInstanceId: phaseInstanceId || createPhaseInstanceId(),
+    phaseInstanceId: instanceId,
     round: Math.max(1, Number(round || 1) || 1),
     phase: PHASE_ORDER.includes(phase) ? phase : PHASES.VANGUARD,
     status: LIFECYCLE_STATUS.PREPARING,
@@ -99,6 +102,7 @@ export function createLifecycle({ phase, round, roster, phaseInstanceId = null }
     start: emptyBoundaryBlock(BOUNDARY_STATUS.PENDING),
     end: emptyBoundaryBlock(BOUNDARY_STATUS.PENDING),
     turns,
+    timing: createTiming({ phaseInstanceId: instanceId }),
   };
 }
 
@@ -214,8 +218,14 @@ export function normalizeLifecycle(lifecycle, { combatantIds = null } = {}) {
     }
   }
 
+  const phaseInstanceId = String(lifecycle.phaseInstanceId || createPhaseInstanceId());
+  const timing = normalizeTiming(lifecycle.timing ?? createTiming({ phaseInstanceId }), {
+    combatantIds: idSet ?? roster,
+    phaseInstanceId,
+  });
+
   return {
-    phaseInstanceId: String(lifecycle.phaseInstanceId || createPhaseInstanceId()),
+    phaseInstanceId,
     round: Math.max(1, Number(lifecycle.round || 1) || 1),
     phase,
     status,
@@ -224,6 +234,7 @@ export function normalizeLifecycle(lifecycle, { combatantIds = null } = {}) {
     start: sanitizeBoundaryBlock(lifecycle.start),
     end: sanitizeBoundaryBlock(lifecycle.end),
     turns,
+    timing,
   };
 }
 

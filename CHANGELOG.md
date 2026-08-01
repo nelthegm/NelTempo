@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1
+
+- Rebranded display name to **NelTempo** (formerly Dynamic Initiative); module id `nel-dynamic-initiative` unchanged.
+- Added PF2e condition timing for **Grabbed**, **Restrained**, and **Confused** via structured slug adapter (`scripts/pf2e-condition-adapter.js`); fail-open when APIs unavailable.
+- **Grabbed** and **Restrained** block voluntary Delay to Rearguard during open Vanguard lifecycle.
+- **Confused** priority gate: Confused roster combatants must End Turn in deterministic order (roster → combatant id) before others.
+- Timing state under `lifecycle.timing` with audit trail, badges, and mid-phase condition reconciliation.
+- GM overrides: Allow Delay Once, Move to Rearguard, Resolve/Skip Priority, Reopen Confused Turn, Resume Current Once, Clear Override.
+- World setting **Enforce Condition Timing** (default on; no migration write).
+- Player Reopen blocked for Confused-resolved turns; GM uses dedicated override path.
+- Documentation: `docs/SLICE_0_2_1_CONDITION_TIMING.md`, `docs/SLICE_0_2_1_TEST_PLAN.md`.
+
 ## 0.2.0
 
 - Added formal phase lifecycle for Vanguard, Enemy, and Rearguard with durable `lifecycle` state (schema 3).

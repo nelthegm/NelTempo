@@ -24,14 +24,19 @@ const INCLUDE = [
   "scripts/initiative.js",
   "scripts/lifecycle.js",
   "scripts/main.js",
+  "scripts/pf2e-condition-adapter.js",
   "scripts/pf2e-lifecycle-adapter.js",
   "scripts/shields.js",
   "scripts/state.js",
+  "scripts/timing.js",
+  "scripts/timing-service.js",
   "scripts/ui.js",
   "scripts/utils.js",
   "styles/dynamic-initiative.css",
   "lang/en.json",
   "assets/icon.svg",
+  "docs/SLICE_0_2_1_CONDITION_TIMING.md",
+  "docs/SLICE_0_2_1_TEST_PLAN.md",
 ];
 
 function ensureIncludes() {

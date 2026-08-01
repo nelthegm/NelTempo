@@ -1,5 +1,5 @@
 export const MODULE_ID = "nel-dynamic-initiative";
-export const MODULE_TITLE = "Dynamic Initiative";
+export const MODULE_TITLE = "NelTempo";
 export const SOCKET_NAME = `module.${MODULE_ID}`;
 export const FLAG_STATE = "state";
 
@@ -12,6 +12,8 @@ export const SETTINGS = Object.freeze({
   DEBUG: "debugLogging",
   /** off | prompt | automatic — advance when all roster turns end */
   AUTO_ADVANCE_PHASE: "autoAdvancePhase",
+  /** Enforce Grabbed/Restrained/Confused timing restrictions */
+  ENFORCE_CONDITION_TIMING: "enforceConditionTiming",
 });
 
 export const AUTO_ADVANCE = Object.freeze({
@@ -42,4 +44,12 @@ export const REQUESTS = Object.freeze({
   UNDO: "undo",
   END_COMBAT: "end-combat",
   REGISTER_SHIELD: "register-shield",
+  TIMING_ALLOW_DELAY_ONCE: "timing-allow-delay-once",
+  TIMING_MOVE_REARGUARD: "timing-move-rearguard",
+  TIMING_RESOLVE_PRIORITY: "timing-resolve-priority",
+  TIMING_SKIP_PRIORITY: "timing-skip-priority",
+  TIMING_REOPEN_CONFUSED: "timing-reopen-confused",
+  TIMING_RESUME_CURRENT_ONCE: "timing-resume-current-once",
+  TIMING_CLEAR_OVERRIDE: "timing-clear-override",
+  TIMING_RECONCILE: "timing-reconcile",
 });

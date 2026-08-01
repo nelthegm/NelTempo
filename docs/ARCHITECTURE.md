@@ -1,20 +1,23 @@
-# Dynamic Initiative Architecture
+# NelTempo Architecture
+
+*Formerly Dynamic Initiative.*
 
 ## Purpose
 
-Dynamic Initiative stores encounter flow state on the Foundry **Combat** document and drives a portrait dock UI. It does not replace PF2e combat resolution; it orchestrates phase order and free-order activation.
+NelTempo stores encounter flow state on the Foundry **Combat** document and drives a portrait dock UI. It does not replace PF2e combat resolution; it orchestrates phase order and free-order activation.
 
 ## Module identity
 
 | Field | Value |
 | --- | --- |
 | Module ID | `nel-dynamic-initiative` |
+| Display title | NelTempo |
 | State flag | `flags.nel-dynamic-initiative.state` |
 | Socket | `module.nel-dynamic-initiative` |
 
 ## State ownership
 
-All Dynamic Initiative encounter state lives under a single combat flag:
+All NelTempo encounter state lives under a single combat flag:
 
 ```
 combat.flags["nel-dynamic-initiative"].state
@@ -50,10 +53,12 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
   delayed: { [combatantId]: true },
   lastSkills: { [combatantId]: skillSlug },
   shields: { [itemUuid]: ShieldEntry },
-  lifecycle: PhaseLifecycle | null,  // Vanguard/Enemy/Rearguard only
+  lifecycle: PhaseLifecycle | null,  // Vanguard/Enemy/Rearguard only; includes timing (0.2.1)
   history: [{ label, at, state }]  // undo stack; nested states have empty history
 }
 ```
+
+`lifecycle.timing` (0.2.1) holds condition snapshots, Confused priority gate, GM overrides, and audit entries scoped to `phaseInstanceId`. See `docs/SLICE_0_2_1_CONDITION_TIMING.md`.
 
 See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 
@@ -198,6 +203,18 @@ State is on the Combat document. After refresh:
 - Phase, round, results, and acted maps resume.
 - Open prompt modals are reconstructed only when the GM re-prompts or auto-open logic runs for an active prompt.
 
+## Condition timing layer (0.2.1)
+
+| File | Role |
+| --- | --- |
+| `scripts/pf2e-condition-adapter.js` | Structured PF2e slug detection (`grabbed`, `restrained`, `confused`); fail-open |
+| `scripts/timing.js` | Pure timing state, eligibility, overrides, badges |
+| `scripts/timing-service.js` | Live reconciliation on phase open, item updates, reload |
+
+The condition adapter uses `hasCondition`, `conditions.hasType`, `getCondition`, and `itemTypes.condition` only — never description or name parsing. Failed reads do not invent restrictions.
+
+Timing enforcement is gated by world setting **Enforce Condition Timing** (default true) and lifecycle status **Open**.
+
 ## File map
 
 | File | Role |
@@ -209,4 +226,8 @@ State is on the Combat document. After refresh:
 | `scripts/ui.js` | Portrait dock and prompts |
 | `scripts/initiative.js` | PF2e skill rolls |
 | `scripts/shields.js` | Raise a Shield tracking |
+| `scripts/pf2e-lifecycle-adapter.js` | Native start/end turn at phase boundaries |
+| `scripts/pf2e-condition-adapter.js` | PF2e condition slug reads (0.2.1) |
+| `scripts/timing.js` | Pure condition-timing state (0.2.1) |
+| `scripts/timing-service.js` | Live timing reconciliation (0.2.1) |
 | `scripts/constants.js` | Module id, settings keys, request types |

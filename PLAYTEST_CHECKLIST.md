@@ -1,20 +1,20 @@
-# Dynamic Initiative v0.2.0 — Playtest Checklist
+# NelTempo v0.2.1 — Playtest Checklist
 
-Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
+*Formerly Dynamic Initiative.* Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
 ## Setup
 
-- [ ] Enable **Dynamic Initiative** in Manage Modules.
+- [ ] Enable **NelTempo** in Manage Modules.
 - [ ] Refresh every connected browser after enabling it.
 - [ ] Add two player-owned PCs and two hostile NPCs to the encounter.
 - [ ] Include one PC carrying a shield and one PC with a reaction.
 - [ ] Confirm the portrait dock appears at the top-center and can be dragged.
-- [ ] Confirm Foundry’s native Encounter Tracker is hidden while Dynamic Initiative is active.
+- [ ] Confirm Foundry’s native Encounter Tracker is hidden while NelTempo is active.
 - [ ] Hover each portrait and confirm its canvas token highlights.
 
 ## Opening Initiative
 
-- [ ] Start Dynamic Initiative.
+- [ ] Start NelTempo.
 - [ ] Change the Enemy Initiative DC.
 - [ ] Set a suggested initiative skill.
 - [ ] Prompt Initiative.
@@ -50,7 +50,22 @@ Use a copied world or make a world backup before the first test. Disable Combat 
 
 - [ ] Raise a Shield during Vanguard; confirm it remains through Enemy and expires when Enemy ends.
 - [ ] Raise a Shield during Rearguard; confirm it survives the round transition and expires after the next Enemy phase.
-- [ ] Confirm ending combat removes any shield effects managed by Dynamic Initiative.
+- [ ] Confirm ending combat removes any shield effects managed by NelTempo.
+
+## Condition timing (0.2.1)
+
+Requires **Enforce Condition Timing** on (default). See `docs/SLICE_0_2_1_TEST_PLAN.md` for full AF checklist.
+
+- [ ] Apply **Grabbed** to a Vanguard PC; confirm **Delay to Rearguard** is blocked.
+- [ ] Remove Grabbed; confirm Delay works again.
+- [ ] Apply **Restrained**; confirm Delay blocked with Restrained message.
+- [ ] Apply **Confused** to one Vanguard PC; confirm **Must Act First** badge and non-Confused PCs cannot End Turn until it resolves.
+- [ ] Two Confused PCs: confirm roster order determines who must act first.
+- [ ] GM **Allow Delay Once** permits one Delay despite block; second attempt blocked.
+- [ ] GM **Move to Rearguard** moves a blocked combatant without removing the condition.
+- [ ] GM **Resolve Priority** / **Skip Priority** advances gate without removing Confused.
+- [ ] Player cannot **Reopen Turn** after a Confused-resolved turn; GM **Reopen Confused Turn** works with confirm.
+- [ ] Toggle **Enforce Condition Timing** off; confirm Delay and End Turn unrestricted.
 
 ## Rearguard and Next Round
 
@@ -78,4 +93,4 @@ When reporting a problem, include:
 - PF2e Workbench version
 - The phase and round where it occurred
 - Browser console error text, if any
-- Whether Debug Logging was enabled in Dynamic Initiative settings
+- Whether Debug Logging was enabled in NelTempo settings

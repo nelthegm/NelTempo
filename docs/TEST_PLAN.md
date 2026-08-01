@@ -1,4 +1,6 @@
-# Dynamic Initiative Test Plan
+# NelTempo Test Plan
+
+*Formerly Dynamic Initiative.*
 
 ## Static and mocked tests
 
@@ -8,7 +10,8 @@ Run:
 npm test
 ```
 
-Lifecycle-specific plan: `docs/SLICE_0_2_0_TEST_PLAN.md`.
+Lifecycle plan: `docs/SLICE_0_2_0_TEST_PLAN.md`.  
+Condition timing plan (0.2.1): `docs/SLICE_0_2_1_TEST_PLAN.md`.
 
 | # | Check | Covered by |
 | --- | --- | --- |
@@ -49,6 +52,11 @@ Lifecycle-specific plan: `docs/SLICE_0_2_0_TEST_PLAN.md`.
 | 35 | socket request shape compatible | constants + persistence tests |
 | 36 | debug logging disabled by default | main.js source check |
 | 37 | package contains module.json at ZIP root | `package-validate.test.mjs` when ZIP present |
+| 38 | condition adapter fail-open + slug detection | `timing.test.mjs` |
+| 39 | delay block + Confused priority pure state | `timing.test.mjs` |
+| 40 | GM override grant/consume/clear | `timing.test.mjs` |
+| 41 | timing normalizes with lifecycle; serializable | `timing.test.mjs` |
+| 42 | branding NelTempo / id unchanged | `timing.test.mjs` |
 
 ## Runtime tests (Foundry V14 + PF2e 8.3.0)
 
@@ -63,7 +71,7 @@ These require a live world. Do **not** mark them passed without executing them.
 7. Start a new round.
 8. Repeat for three rounds.
 9. Confirm no forced-deletion compatibility warnings.
-10. Confirm no Dynamic Initiative exceptions.
+10. Confirm no NelTempo exceptions.
 11. Use Undo from every phase.
 12. Remove a combatant during Initiative.
 13. Remove one during Vanguard.
@@ -84,6 +92,7 @@ These require a live world. Do **not** mark them passed without executing them.
 28. Inspect stored combat flags.
 29. Confirm only current combatant IDs remain.
 30. Confirm existing UI and rules are unchanged.
+31. Run 0.2.1 timing runtime checklist (AF 1–70 in `docs/SLICE_0_2_1_TEST_PLAN.md`).
 
 ### Flag inspection helper (GM console)
 
