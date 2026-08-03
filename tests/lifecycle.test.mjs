@@ -454,7 +454,7 @@ assert.equal(REQUESTS.END_REMAINING, "end-remaining");
 
 // Module version
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.2");
+assert.equal(moduleJson.version, "0.3.3");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 
 // Localization keys exist

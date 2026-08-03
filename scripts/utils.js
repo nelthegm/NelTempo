@@ -522,8 +522,35 @@ export function currentInterfaceScalePercent() {
   }
 }
 
+/**
+ * Envelope keys owned by NelTempo request helpers. Caller-provided data cannot
+ * replace these; they are always written from the local client context.
+ *
+ * Foundry package sockets do not supply an authenticated sender User to the
+ * receiver — only the client-claimed `userId` field. This policy prevents
+ * accidental/local overwrite; it is not transport-level sender authentication.
+ */
+export const SOCKET_ENVELOPE_KEYS = Object.freeze(["type", "userId", "sentAt"]);
+
+/**
+ * Build a socket/local request payload.
+ * Untrusted request fields are copied first; trusted envelope fields last.
+ * Does not mutate the caller’s `data` object.
+ */
 export function socketPayload(type, data = {}) {
-  return { type, userId: game.user.id, sentAt: Date.now(), ...data };
+  const source =
+    data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const sanitized = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (SOCKET_ENVELOPE_KEYS.includes(key)) continue;
+    sanitized[key] = value;
+  }
+  return {
+    ...sanitized,
+    type,
+    userId: game.user.id,
+    sentAt: Date.now(),
+  };
 }
 
 /**

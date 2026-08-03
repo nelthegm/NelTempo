@@ -194,8 +194,19 @@ async function ensureCombat() {
 
 function validateRequestUser(payload) {
   const user = game.users.get(payload.userId);
-  if (!user?.active) throw new Error(game.i18n.localize("NDI.Error.UserInactive"));
+  if (!user) throw new Error(game.i18n.localize("NDI.Error.UserInactive"));
+  if (!user.active) throw new Error(game.i18n.localize("NDI.Error.UserInactive"));
   return user;
+}
+
+/** START / PROMPT must be GM-authorized at every entry point (UI, API, socket). */
+export function isGmEntryRequest(type) {
+  return type === REQUESTS.START || type === REQUESTS.PROMPT;
+}
+
+function requireRequestUserIsGm(requestUser) {
+  if (!requestUser?.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  return requestUser;
 }
 
 function localize(key, data) {
@@ -1697,7 +1708,12 @@ export async function reconcileTimingFromConditionHook(item) {
 
 async function dispatchGMRequest(payload) {
   const requestUser = validateRequestUser(payload);
-  if (payload.type === REQUESTS.START) return await startDynamicInitiative(payload);
+  if (isGmEntryRequest(payload.type)) {
+    requireRequestUserIsGm(requestUser);
+  }
+  if (payload.type === REQUESTS.START) {
+    return await startDynamicInitiative(payload);
+  }
 
   const combat = game.combats.get(payload.combatId) ?? getCombat();
   const state = getState(combat);
@@ -1809,11 +1825,27 @@ export async function handleGMRequest(payload) {
   });
 }
 
+/**
+ * Local request entry used by UI and `game.dynamicInitiative`.
+ * START / PROMPT reject non-GM callers locally without emitting a socket request.
+ * Authoritative GM checks still run again in dispatch on the primary GM.
+ */
 export async function requestAction(type, data = {}) {
+  if (isGmEntryRequest(type) && !game.user?.isGM) {
+    const message = localize("NDI.Error.GmOnly");
+    notify("error", message);
+    return { ok: false, reason: "gm-only", error: new Error(message) };
+  }
+
   const combat = getCombat();
   const payload = socketPayload(type, { combatId: combat?.id ?? null, ...data });
   if (isPrimaryGM()) return handleGMRequest(payload);
   game.socket.emit(SOCKET_NAME, payload);
+}
+
+/** @internal Exported for focused authority tests. */
+export async function dispatchGMRequestForTests(payload) {
+  return dispatchGMRequest(payload);
 }
 
 export function socketHandler(payload) {

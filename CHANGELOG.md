@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3
+
+- Added authoritative GM checks for starting Dynamic Initiative and prompting initiative.
+- Hardened NelTempo request envelopes so caller data cannot overwrite the current user identity.
+- Added local permission checks to the exposed start and prompt API.
+- No combat lifecycle or UI behavior changed.
+- Foundry package sockets still do not expose an independently authenticated sender User; receivers continue to resolve the client-claimed `userId` and re-check permissions authoritatively.
+
 ## 0.3.2
 
 - Dynamic Initiative start instructions are now visible only to GMs.

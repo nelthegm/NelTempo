@@ -20,9 +20,14 @@ function read(rel) {
 const moduleJson = JSON.parse(read("module.json"));
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
-assert.equal(moduleJson.version, "0.3.2");
+assert.equal(moduleJson.version, "0.3.3");
 assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
+assert.equal(
+  moduleJson.download,
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.3-rc1/dynamic-initiative.zip",
+);
+assert.equal(moduleJson.manifest, "https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json");
 
 // 2. Entry points exist
 for (const file of [

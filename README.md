@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.3.2  
+**Current version:** 0.3.3  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
 
@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.2**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel. The current packaged candidate is **NelTempo 0.3.3** (authority-hardening maintenance). Foundry V14 / PF2e 8.4.0 runtime acceptance for 0.3.3 is not yet claimed. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.2/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.3-rc1/dynamic-initiative.zip
 ```
 
 ### Manual ZIP install
@@ -210,6 +210,8 @@ NelTempo fails independently and logs its own concise errors.
 
 ## GM macro API
 
+`start` and `prompt` require a GM user. Non-GM callers are rejected locally (no socket emit). Authoritative dispatch still re-checks GM permission on the elected primary GM.
+
 ```js
 game.dynamicInitiative.start();
 game.dynamicInitiative.prompt();
@@ -220,6 +222,10 @@ game.dynamicInitiative.phase("initiative");
 game.dynamicInitiative.undo();
 game.dynamicInitiative.end();
 ```
+
+### Package-socket trust note
+
+Foundry’s `game.socket` package channel does not provide a separately authenticated sender User to receivers. NelTempo always stamps the local `userId` on outbound envelopes and ignores caller attempts to overwrite envelope fields, then re-validates the claimed user and permissions on the primary GM. A malicious client can still claim another user’s id on a raw socket emit; this release does not add socketlib or transport authentication.
 
 ## Documentation
 
