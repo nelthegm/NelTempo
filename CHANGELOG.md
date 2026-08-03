@@ -2,10 +2,12 @@
 
 ## 0.3.2
 
-- Dynamic Initiative start instructions are now GM-only.
-- Added a client-local 50%–100% NelTempo interface scale.
-- Added optional public encounter countdowns configured by the GM.
-- Added a local portrait indicator for the currently controlled token.
+- Dynamic Initiative start instructions are now visible only to GMs.
+- Added a client-local NelTempo interface scale from 50% to 100%.
+- Added optional public encounter countdowns configured and edited by the GM.
+- Added a client-local indicator for the currently controlled combatant token.
+- Active and Ready turn states remain separate from token control.
+- Runtime accepted on Foundry 14.365 and PF2e 8.4.0.
 
 ## 0.3.1
 

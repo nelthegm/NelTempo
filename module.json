@@ -50,6 +50,6 @@
   "changelog": "CHANGELOG.md",
   "url": "https://github.com/nelthegm/NelTempo",
   "manifest": "https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json",
-  "download": "https://github.com/nelthegm/NelTempo/releases/download/v0.3.2-rc1/dynamic-initiative.zip",
+  "download": "https://github.com/nelthegm/NelTempo/releases/download/v0.3.2/dynamic-initiative.zip",
   "bugs": "https://github.com/nelthegm/NelTempo/issues"
 }

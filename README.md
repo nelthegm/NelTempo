@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This points at the `v0.3.2-rc1` runtime-test release candidate. Foundry V14 / PF2e 8.4.0 runtime acceptance is not yet claimed. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.2**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.2-rc1/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.2/dynamic-initiative.zip
 ```
 
 ### Manual ZIP install
