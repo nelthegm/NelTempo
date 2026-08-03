@@ -21,12 +21,12 @@ import { beginRoundTransition, createState, normalizeState } from "../scripts/st
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.3");
+assert.equal(moduleJson.version, "0.3.4");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.3-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.4-rc1/dynamic-initiative.zip",
 );
 assert.equal(SETTINGS.INTERFACE_SCALE, "interfaceScale");
 assert.equal(REQUESTS.COUNTDOWN_SET, "countdown-set");
@@ -88,12 +88,16 @@ assert.equal(clampInterfaceScale("nope", 100), 100);
 
 const mainSrc = readFileSync(join(root, "scripts/main.js"), "utf8");
 assert.match(mainSrc, /INTERFACE_SCALE/);
+assert.match(mainSrc, /PORTRAIT_SCALE/);
+assert.match(mainSrc, /PHASE_BAR_SCALE/);
 assert.match(mainSrc, /range:\s*\{\s*min:\s*50,\s*max:\s*100,\s*step:\s*5/);
 assert.match(mainSrc, /scope:\s*"client"/);
 
 const uiSrc = readFileSync(join(root, "scripts/ui.js"), "utf8");
-assert.match(uiSrc, /--ndi-interface-scale/);
-assert.match(uiSrc, /style\.zoom/);
+assert.match(uiSrc, /--ndi-portrait-scale/);
+assert.match(uiSrc, /--ndi-phase-bar-scale/);
+assert.equal(uiSrc.includes("root.style.zoom"), false);
+assert.equal(/style\.zoom\s*=/.test(uiSrc), false);
 assert.match(uiSrc, /is-token-controlled/);
 assert.match(uiSrc, /TokenSelected/);
 assert.match(uiSrc, /edit-countdown/);

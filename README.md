@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.3.3  
+**Current version:** 0.3.4  
 **Module ID:** `nel-dynamic-initiative`  
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
 
@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel. The current packaged candidate is **NelTempo 0.3.3** (authority-hardening maintenance). Foundry V14 / PF2e 8.4.0 runtime acceptance for 0.3.3 is not yet claimed. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel. The current packaged candidate is **NelTempo 0.3.4** (compact / accessible combat interface). Foundry V14 / PF2e 8.4.0 runtime acceptance for 0.3.4 is not yet claimed. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.3-rc1/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.4-rc1/dynamic-initiative.zip
 ```
 
 ### Manual ZIP install
@@ -119,7 +119,10 @@ Condition detection uses structured PF2e slugs only (`grabbed`, `restrained`, `c
 
 | Setting | Scope | Default | Description |
 | --- | --- | --- | --- |
-| Portrait Size | Client | 72 | Portrait height in the dock |
+| Portrait Size | Client | 72 | Base portrait height in the dock |
+| Portrait Scale | Client | 100% | Visual scale of portrait art (50–100%); control hit targets stay usable |
+| Phase Bar Scale | Client | 100% | Scale of the phase/status bar only (60–100%) |
+| Phase Bar Layout | Client | Auto | Auto / Compact / Full; Auto chooses Compact when space or scale is constrained |
 | Top Offset | Client | 8 | Default distance from the top of the window |
 | Maximum Dock Width | Client | 62 | Max width as a percentage of the browser |
 | Automatically Open Initiative Prompts | Client | true | Auto-open skill prompts when the GM prompts |
@@ -127,6 +130,18 @@ Condition detection uses structured PF2e slugs only (`grabbed`, `restrained`, `c
 | Advance Completed Phases Automatically | World | Off | Off / Prompt GM / Automatic when all turns end |
 | Enforce Condition Timing | World | true | Grabbed/Restrained delay block and Confused priority gate |
 | NelTempo Debug Logging | Client | false | Concise state diagnostics in the browser console |
+
+Legacy **Interface Scale** (whole-dock zoom) is migrated once into Portrait Scale and Phase Bar Scale, then hidden. The stored legacy value remains for rollback.
+
+### Compact phase bar
+
+- **GM Compact:** round, phase, ended count, one primary action (Next Phase / Prompt), overflow menu for End Remaining, Force Advance, Rearguard, Undo, End Combat.
+- **Player Compact:** round, phase, and End Turn when exactly one eligible owned combatant can end.
+- **GM right-click** a portrait to open the initiative/phase editor (left-click still selects the token).
+
+### End Turn keybinding
+
+Configure **NelTempo: End Current Turn** under Foundry Configure Controls. It is unbound by default and uses the normal End Turn authority path.
 
 ### Debug logging
 

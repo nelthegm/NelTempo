@@ -1,4 +1,4 @@
-import { MODULE_ID, REQUESTS, SETTINGS } from "./constants.js";
+import { MODULE_ID, PHASE_BAR_LAYOUTS, REQUESTS, SETTINGS } from "./constants.js";
 import { getPlacementEditorProjection, requestAction } from "./controller.js";
 import { formatCountdownDisplay, sanitizeCountdown } from "./countdown.js";
 import { rollDynamicInitiative } from "./initiative.js";
@@ -11,6 +11,12 @@ import {
 } from "./lifecycle.js";
 import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
 import { activateCombatantPortrait } from "./portrait-activation.js";
+import {
+  currentPhaseBarScalePercent,
+  currentPortraitScalePercent,
+  isTextEntryTarget,
+  resolvedPhaseBarLayoutNow,
+} from "./presentation.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
 import { isTimingEnforced } from "./timing-service.js";
 import {
@@ -23,7 +29,6 @@ import {
   activePlayerOwners,
   combatantName,
   combatantSide,
-  currentInterfaceScalePercent,
   currentPortraitSize,
   escapeHTML,
   getCombat,
@@ -43,6 +48,7 @@ const LAUNCHER_ID = "ndi-launcher";
 const MODAL_CLASS = "ndi-initiative-modal";
 const DRAG_KEY = `${MODULE_ID}.dock-position`;
 const openPromptIds = new Set();
+let overflowMenuCloser = null;
 
 function t(key, data) {
   try {
@@ -352,8 +358,12 @@ function portraitHTML(combatant, state) {
       ? gmTimingMenuHTML(combatant, state)
       : "";
 
+  const portraitTip = game.user.isGM
+    ? t("NDI.Portrait.ActivateAndEditTip")
+    : t("NDI.Portrait.ActivateToken");
+
   return `<article class="${portraitClasses(combatant, state)}" data-combatant-id="${combatant.id}">
-    <button type="button" class="ndi-portrait-main" data-action="activate-portrait" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Portrait.ActivateToken"))}" aria-label="${escapeHTML(t("NDI.Portrait.ActivateToken"))}">
+    <button type="button" class="ndi-portrait-main" data-action="activate-portrait" data-combatant-id="${combatant.id}" title="${escapeHTML(portraitTip)}" aria-label="${escapeHTML(portraitTip)}">
       <span class="ndi-image-wrap">
         <img src="${escapeHTML(portraitFor(combatant))}" alt="${escapeHTML(combatantName(combatant))}" draggable="false">
         ${resultBadge}
@@ -482,12 +492,122 @@ function countdownPillHTML(state) {
     </${tag}>`;
 }
 
+function compactProgressText(combat, state) {
+  if (!isLifecyclePhase(state.phase) || !state.lifecycle) return "";
+  const progress = lifecycleProgress(state.lifecycle, {
+    combatantIds: [...combat.combatants].map((c) => c.id),
+  });
+  return `${progress.ended}/${progress.total}`;
+}
+
+function gmPrimaryPhaseButtonHTML(combat, state) {
+  const lifecycle = state.lifecycle;
+  const progress = lifecycle
+    ? lifecycleProgress(lifecycle, { combatantIds: [...combat.combatants].map((c) => c.id) })
+    : null;
+  const phaseComplete = lifecycle?.status === LIFECYCLE_STATUS.COMPLETE || progress?.complete;
+  const busy = lifecycleBusy(state);
+
+  if (state.phase === PHASES.INITIATIVE) {
+    return `<button type="button" class="ndi-primary" data-action="prompt" title="${escapeHTML(t("NDI.Control.PromptInitiative"))}">
+      <i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.PromptInitiative"))}
+    </button>`;
+  }
+
+  if (isLifecyclePhase(state.phase) && lifecycle) {
+    if (phaseComplete && !busy) {
+      return `<button type="button" class="ndi-primary" data-action="advance-phase" title="${escapeHTML(t("NDI.Control.AdvancePhase"))}">
+        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+      </button>`;
+    }
+    if (!phaseComplete && !busy) {
+      return `<button type="button" data-action="apply-phase" ${progress && !progress.complete ? "disabled" : ""} title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
+        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+      </button>`;
+    }
+    return "";
+  }
+
+  return `<button type="button" class="ndi-primary" data-action="apply-phase" title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
+    <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+  </button>`;
+}
+
+function gmOverflowItemsHTML(combat, state) {
+  const lifecycle = state.lifecycle;
+  const progress = lifecycle
+    ? lifecycleProgress(lifecycle, { combatantIds: [...combat.combatants].map((c) => c.id) })
+    : null;
+  const open = lifecycle?.status === LIFECYCLE_STATUS.OPEN;
+  const busy = lifecycleBusy(state);
+  const recovery = gmRecoveryControlsHTML(state);
+  let items = "";
+
+  if (state.phase === PHASES.INITIATIVE) {
+    items += `<label class="ndi-field ndi-overflow-field">DC <input type="number" min="0" max="99" value="${state.enemyDC}" data-action="dc"></label>`;
+    items += `<label class="ndi-field ndi-overflow-field">Skill
+      <select data-action="suggested-skill">${skillOptionsHTML(state.suggestedSkill)}</select>
+    </label>`;
+  }
+
+  if (isLifecyclePhase(state.phase) && lifecycle && open && progress && !progress.complete) {
+    items += `<button type="button" data-action="end-remaining" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.EndRemaining"))}">
+      <i class="fa-solid fa-check-double"></i> ${escapeHTML(t("NDI.Control.EndRemaining"))}
+    </button>`;
+    items += `<button type="button" data-action="force-advance" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.ForceAdvance"))}">
+      <i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Control.ForceAdvance"))}
+    </button>`;
+  }
+
+  items += recovery;
+  items += `<button type="button" data-action="move-active-rearguard" ${state.phase === PHASES.VANGUARD && !busy ? "" : "disabled"}>
+    <i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Rearguard"))}
+  </button>`;
+  items += `<button type="button" data-action="undo"><i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Control.Undo"))}</button>`;
+  items += `<button type="button" class="ndi-danger" data-action="end-combat"><i class="fa-solid fa-flag-checkered"></i> ${escapeHTML(t("NDI.Control.End"))}</button>`;
+  return items;
+}
+
+function gmCompactControlsHTML(combat, state) {
+  const primary = gmPrimaryPhaseButtonHTML(combat, state);
+  return `<div class="ndi-gm-controls is-compact">
+    ${primary}
+    <div class="ndi-overflow">
+      <button type="button" class="ndi-overflow-toggle" data-action="toggle-overflow" title="${escapeHTML(t("NDI.Control.MoreActions"))}" aria-label="${escapeHTML(t("NDI.Control.MoreActions"))}" aria-haspopup="menu" aria-expanded="false">
+        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+      </button>
+      <div class="ndi-overflow-menu" role="menu" hidden>
+        ${gmOverflowItemsHTML(combat, state)}
+      </div>
+    </div>
+  </div>`;
+}
+
 function bottomBarHTML(combat, state) {
-  const reactionNote = state.phase === PHASES.ENEMY
-    ? '<span class="ndi-reaction-note"><i class="fa-solid fa-shield-halved"></i> Reactions resolve normally</span>'
-    : "";
-  const dc = state.phase === PHASES.INITIATIVE ? ` · Enemy DC ${state.enemyDC}` : "";
-  return `<footer class="ndi-bottom-bar ndi-drag-handle" title="Drag to move; double-click to reset">
+  const layout = resolvedPhaseBarLayoutNow();
+  const phaseScale = currentPhaseBarScalePercent() / 100;
+  const progress = compactProgressText(combat, state);
+  const dc = state.phase === PHASES.INITIATIVE ? ` · DC ${state.enemyDC}` : "";
+  const progressBit = progress ? ` · ${progress}` : "";
+  const reactionNote =
+    state.phase === PHASES.ENEMY && layout === PHASE_BAR_LAYOUTS.FULL
+      ? '<span class="ndi-reaction-note"><i class="fa-solid fa-shield-halved"></i> Reactions resolve normally</span>'
+      : "";
+
+  if (layout === PHASE_BAR_LAYOUTS.COMPACT) {
+    const playerControls = playerCompactControlsHTML(combat, state);
+    const gmControls = game.user.isGM ? gmCompactControlsHTML(combat, state) : "";
+    return `<footer class="ndi-bottom-bar ndi-drag-handle is-compact" data-phase-layout="compact" style="--ndi-phase-bar-scale:${phaseScale}" title="Drag to move; double-click to reset">
+      <div class="ndi-compact-status" title="${escapeHTML(`${t("NDI.Phase." + (state.phase === PHASES.INITIATIVE ? "Initiative" : state.phase === PHASES.VANGUARD ? "Vanguard" : state.phase === PHASES.ENEMY ? "Enemy" : "Rearguard"))}`)}">
+        <span class="ndi-round-phase">R${state.round} · ${phaseLabel(state.phase)}${progressBit}${dc}</span>
+        ${countdownPillHTML(state)}
+      </div>
+      ${playerControls}
+      ${gmControls}
+    </footer>`;
+  }
+
+  return `<footer class="ndi-bottom-bar ndi-drag-handle is-full" data-phase-layout="full" style="--ndi-phase-bar-scale:${phaseScale}" title="Drag to move; double-click to reset">
     <div class="ndi-status-row">
       <div class="ndi-round-phase">Round ${state.round} · ${phaseLabel(state.phase)} Phase${dc}</div>
       ${countdownPillHTML(state)}
@@ -497,6 +617,132 @@ function bottomBarHTML(combat, state) {
     ${playerActiveControlsHTML(combat, state)}
     ${gmControlsHTML(combat, state)}
   </footer>`;
+}
+
+function gmControlsHTML(combat, state) {
+  if (!game.user.isGM) return "";
+  const initiativeControls = state.phase === PHASES.INITIATIVE
+    ? `<label class="ndi-field">DC <input type="number" min="0" max="99" value="${state.enemyDC}" data-action="dc"></label>
+       <label class="ndi-field">Skill
+         <select data-action="suggested-skill">${skillOptionsHTML(state.suggestedSkill)}</select>
+       </label>
+       <button type="button" data-action="prompt"><i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.PromptInitiative"))}</button>`
+    : "";
+
+  const lifecycle = state.lifecycle;
+  const progress = lifecycle
+    ? lifecycleProgress(lifecycle, { combatantIds: [...combat.combatants].map((c) => c.id) })
+    : null;
+  const phaseComplete = lifecycle?.status === LIFECYCLE_STATUS.COMPLETE || progress?.complete;
+  const open = lifecycle?.status === LIFECYCLE_STATUS.OPEN;
+  const busy = lifecycleBusy(state);
+  const recovery = gmRecoveryControlsHTML(state);
+
+  let phaseButtons = "";
+  if (isLifecyclePhase(state.phase) && lifecycle) {
+    if (open && progress && !progress.complete) {
+      phaseButtons += `<button type="button" data-action="end-remaining" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.EndRemaining"))}">
+        <i class="fa-solid fa-check-double"></i> ${escapeHTML(t("NDI.Control.EndRemaining"))}
+      </button>`;
+      phaseButtons += `<button type="button" data-action="force-advance" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.ForceAdvance"))}">
+        <i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Control.ForceAdvance"))}
+      </button>`;
+    }
+    if (phaseComplete && !busy) {
+      phaseButtons += `<button type="button" class="ndi-primary" data-action="advance-phase" title="${escapeHTML(t("NDI.Control.AdvancePhase"))}">
+        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.AdvancePhase"))}
+      </button>`;
+    } else if (!isLifecyclePhase(state.phase) || state.phase === PHASES.INITIATIVE) {
+      phaseButtons += `<button type="button" data-action="apply-phase" title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
+        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+      </button>`;
+    } else if (!phaseComplete && !busy) {
+      phaseButtons += `<button type="button" data-action="apply-phase" ${progress && !progress.complete ? "disabled" : ""} title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
+        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+      </button>`;
+    }
+  } else {
+    phaseButtons = `<button type="button" data-action="apply-phase" title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
+      <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
+    </button>`;
+  }
+
+  return `<div class="ndi-gm-controls is-full">
+    ${initiativeControls}
+    ${recovery}
+    ${phaseButtons}
+    <button type="button" data-action="move-active-rearguard" ${state.phase === PHASES.VANGUARD && !busy ? "" : "disabled"}>
+      <i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Rearguard"))}
+    </button>
+    <button type="button" data-action="undo"><i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Control.Undo"))}</button>
+    <button type="button" class="ndi-danger" data-action="end-combat"><i class="fa-solid fa-flag-checkered"></i> ${escapeHTML(t("NDI.Control.End"))}</button>
+  </div>`;
+}
+
+function eligibleOwnedEndTurnCombatants(combat, state) {
+  return [...combat.combatants].filter(
+    (combatant) => userCanOwnCombatant(game.user, combatant) && canUserEndTurn(combatant, state),
+  );
+}
+
+function playerCompactControlsHTML(combat, state) {
+  if (game.user.isGM) return "";
+  const eligible = eligibleOwnedEndTurnCombatants(combat, state);
+  if (eligible.length !== 1) return "";
+  const combatant = eligible[0];
+  return `<div class="ndi-active-controls is-compact">
+    <button type="button" class="ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Control.EndTurn"))}">
+      <i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}
+    </button>
+  </div>`;
+}
+
+function playerActiveControlsHTML(combat, state) {
+  // Players: only show End Turn / Delay for owned combatants — never GM recovery tools.
+  if (game.user.isGM) {
+    const combatant = getCombatant(combat, state.activeCombatantId);
+    if (!combatant) return "";
+    if (isTurnFinished(state, combatant.id)) return "";
+    let delay = "";
+    if (state.phase === PHASES.VANGUARD && lifecycleIsOpen(state)) {
+      const delayOk = delayEligibilityFor(combatant, state).allowed;
+      const tip = delayTooltip(combatant, state);
+      delay = `<button type="button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(tip)}" ${delayOk ? "" : "disabled aria-disabled=\"true\""}><i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Delay"))}</button>`;
+    }
+    const endBtn = canUserEndTurn(combatant, state)
+      ? `<button type="button" class="ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}"><i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}</button>`
+      : "";
+    if (!delay && !endBtn) return "";
+    return `<div class="ndi-active-controls">
+      <strong>${escapeHTML(combatantName(combatant))}</strong>
+      ${delay}
+      ${endBtn}
+    </div>`;
+  }
+
+  const eligible = eligibleOwnedEndTurnCombatants(combat, state);
+  const combatant =
+    eligible.length === 1
+      ? eligible[0]
+      : getCombatant(combat, state.activeCombatantId);
+  if (!combatant || !userCanOwnCombatant(game.user, combatant)) return "";
+  if (isTurnFinished(state, combatant.id) && eligible.length === 0) return "";
+
+  let delay = "";
+  if (state.phase === PHASES.VANGUARD && lifecycleIsOpen(state) && !isTurnFinished(state, combatant.id)) {
+    const delayOk = delayEligibilityFor(combatant, state).allowed;
+    const tip = delayTooltip(combatant, state);
+    delay = `<button type="button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(tip)}" ${delayOk ? "" : "disabled aria-disabled=\"true\""}><i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Delay"))}</button>`;
+  }
+  const endBtn = canUserEndTurn(combatant, state)
+    ? `<button type="button" class="ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}"><i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}</button>`
+    : "";
+  if (!delay && !endBtn) return "";
+  return `<div class="ndi-active-controls">
+    <strong>${escapeHTML(combatantName(combatant))}</strong>
+    ${delay}
+    ${endBtn}
+  </div>`;
 }
 
 function skillOptionsHTML(selected) {
@@ -561,90 +807,6 @@ function gmRecoveryControlsHTML(state) {
       </button>`;
   }
   return "";
-}
-
-function gmControlsHTML(combat, state) {
-  if (!game.user.isGM) return "";
-  const initiativeControls = state.phase === PHASES.INITIATIVE
-    ? `<label class="ndi-field">DC <input type="number" min="0" max="99" value="${state.enemyDC}" data-action="dc"></label>
-       <label class="ndi-field">Skill
-         <select data-action="suggested-skill">${skillOptionsHTML(state.suggestedSkill)}</select>
-       </label>
-       <button type="button" data-action="prompt"><i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.PromptInitiative"))}</button>`
-    : "";
-
-  const lifecycle = state.lifecycle;
-  const progress = lifecycle
-    ? lifecycleProgress(lifecycle, { combatantIds: [...combat.combatants].map((c) => c.id) })
-    : null;
-  const phaseComplete = lifecycle?.status === LIFECYCLE_STATUS.COMPLETE || progress?.complete;
-  const open = lifecycle?.status === LIFECYCLE_STATUS.OPEN;
-  const busy = lifecycleBusy(state);
-  const recovery = gmRecoveryControlsHTML(state);
-
-  let phaseButtons = "";
-  if (isLifecyclePhase(state.phase) && lifecycle) {
-    if (open && progress && !progress.complete) {
-      phaseButtons += `<button type="button" data-action="end-remaining" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.EndRemaining"))}">
-        <i class="fa-solid fa-check-double"></i> ${escapeHTML(t("NDI.Control.EndRemaining"))}
-      </button>`;
-      phaseButtons += `<button type="button" data-action="force-advance" ${busy ? "disabled" : ""} title="${escapeHTML(t("NDI.Control.ForceAdvance"))}">
-        <i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Control.ForceAdvance"))}
-      </button>`;
-    }
-    if (phaseComplete && !busy) {
-      phaseButtons += `<button type="button" class="ndi-primary" data-action="advance-phase" title="${escapeHTML(t("NDI.Control.AdvancePhase"))}">
-        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.AdvancePhase"))}
-      </button>`;
-    } else if (!isLifecyclePhase(state.phase) || state.phase === PHASES.INITIATIVE) {
-      phaseButtons += `<button type="button" data-action="apply-phase" title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
-        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
-      </button>`;
-    } else if (!phaseComplete && !busy) {
-      // Keep Next Phase for empty rosters / edge cases.
-      phaseButtons += `<button type="button" data-action="apply-phase" ${progress && !progress.complete ? "disabled" : ""} title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
-        <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
-      </button>`;
-    }
-  } else {
-    phaseButtons = `<button type="button" data-action="apply-phase" title="${escapeHTML(phaseLabel(nextPhase(state.phase)))}">
-      <i class="fa-solid fa-forward-step"></i> ${escapeHTML(t("NDI.Control.NextPhase"))}
-    </button>`;
-  }
-
-  return `<div class="ndi-gm-controls">
-    ${initiativeControls}
-    ${recovery}
-    ${phaseButtons}
-    <button type="button" data-action="move-active-rearguard" ${state.phase === PHASES.VANGUARD && !busy ? "" : "disabled"}>
-      <i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Rearguard"))}
-    </button>
-    <button type="button" data-action="undo"><i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Control.Undo"))}</button>
-    <button type="button" class="ndi-danger" data-action="end-combat"><i class="fa-solid fa-flag-checkered"></i> ${escapeHTML(t("NDI.Control.End"))}</button>
-  </div>`;
-}
-
-function playerActiveControlsHTML(combat, state) {
-  const combatant = getCombatant(combat, state.activeCombatantId);
-  if (!combatant) return "";
-  const canControl = game.user.isGM || userCanOwnCombatant(game.user, combatant);
-  if (!canControl) return "";
-  if (isTurnFinished(state, combatant.id)) return "";
-  let delay = "";
-  if (state.phase === PHASES.VANGUARD && lifecycleIsOpen(state)) {
-    const delayOk = delayEligibilityFor(combatant, state).allowed;
-    const tip = delayTooltip(combatant, state);
-    delay = `<button type="button" data-action="delay" data-combatant-id="${combatant.id}" title="${escapeHTML(tip)}" ${delayOk ? "" : "disabled aria-disabled=\"true\""}><i class="fa-solid fa-arrow-down"></i> ${escapeHTML(t("NDI.Control.Delay"))}</button>`;
-  }
-  const endBtn = canUserEndTurn(combatant, state)
-    ? `<button type="button" class="ndi-primary" data-action="end-turn" data-combatant-id="${combatant.id}"><i class="fa-solid fa-check"></i> ${escapeHTML(t("NDI.Control.EndTurn"))}</button>`
-    : "";
-  if (!delay && !endBtn) return "";
-  return `<div class="ndi-active-controls">
-    <strong>${escapeHTML(combatantName(combatant))}</strong>
-    ${delay}
-    ${endBtn}
-  </div>`;
 }
 
 function restoreDockPosition(root) {
@@ -861,6 +1023,35 @@ function bindDockEvents(root, combat, state) {
     token.refresh?.();
   };
 
+  const closeOverflowMenus = () => {
+    root.querySelectorAll(".ndi-overflow-menu").forEach((menu) => {
+      menu.hidden = true;
+    });
+    root.querySelectorAll(".ndi-overflow-toggle").forEach((btn) => {
+      btn.setAttribute("aria-expanded", "false");
+    });
+    if (overflowMenuCloser) {
+      document.removeEventListener("pointerdown", overflowMenuCloser, true);
+      document.removeEventListener("keydown", overflowMenuCloser, true);
+      overflowMenuCloser = null;
+    }
+  };
+
+  const openOverflowMenu = (toggle) => {
+    closeOverflowMenus();
+    const menu = toggle.parentElement?.querySelector(".ndi-overflow-menu");
+    if (!menu) return;
+    menu.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    overflowMenuCloser = (event) => {
+      if (event.type === "keydown" && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && toggle.parentElement?.contains(event.target)) return;
+      closeOverflowMenus();
+    };
+    document.addEventListener("pointerdown", overflowMenuCloser, true);
+    document.addEventListener("keydown", overflowMenuCloser, true);
+  };
+
   root.addEventListener("pointerover", (event) => {
     const portrait = event.target.closest(".ndi-portrait[data-combatant-id]");
     if (!portrait || portrait.contains(event.relatedTarget)) return;
@@ -873,13 +1064,34 @@ function bindDockEvents(root, combat, state) {
     setPortraitTokenHover(portrait.dataset.combatantId, false);
   });
 
+  root.addEventListener("contextmenu", (event) => {
+    const portrait = event.target.closest(".ndi-portrait[data-combatant-id]");
+    if (!portrait) return;
+    if (!game.user.isGM) return;
+    const combatantId = portrait.dataset.combatantId;
+    if (!combatantId || !getCombatant(combat, combatantId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void openPlacementEditor(combatantId);
+  });
+
   root.addEventListener("click", async (event) => {
     const target = event.target.closest("[data-action]");
     if (!target) return;
     const action = target.dataset.action;
     const combatantId = target.dataset.combatantId;
 
+    if (action !== "toggle-overflow") closeOverflowMenus();
+
     switch (action) {
+      case "toggle-overflow": {
+        event.stopPropagation();
+        const menu = target.parentElement?.querySelector(".ndi-overflow-menu");
+        if (!menu) break;
+        if (menu.hidden) openOverflowMenu(target);
+        else closeOverflowMenus();
+        break;
+      }
       case "activate-portrait": {
         // Local token navigation first — never gated on claim eligibility.
         await activateCombatantPortrait(combat, combatantId);
@@ -1146,6 +1358,11 @@ async function openCountdownEditor(state) {
 export function renderDock() {
   document.getElementById(DOCK_ID)?.remove();
   document.getElementById(LAUNCHER_ID)?.remove();
+  if (overflowMenuCloser) {
+    document.removeEventListener("pointerdown", overflowMenuCloser, true);
+    document.removeEventListener("keydown", overflowMenuCloser, true);
+    overflowMenuCloser = null;
+  }
 
   const combat = getCombat();
   const state = getState(combat);
@@ -1162,15 +1379,17 @@ export function renderDock() {
   const combatants = phaseCombatants(combat, state);
   const root = document.createElement("section");
   root.id = DOCK_ID;
-  const scalePercent = currentInterfaceScalePercent();
-  const scale = scalePercent / 100;
+  const portraitScale = currentPortraitScalePercent() / 100;
+  const phaseBarScale = currentPhaseBarScalePercent() / 100;
   root.style.setProperty("--ndi-portrait-size", `${currentPortraitSize()}px`);
+  root.style.setProperty("--ndi-portrait-scale", String(portraitScale));
+  root.style.setProperty("--ndi-phase-bar-scale", String(phaseBarScale));
   root.style.setProperty("--ndi-max-width", `${game.settings.get(MODULE_ID, SETTINGS.MAX_WIDTH)}vw`);
-  root.style.setProperty("--ndi-interface-scale", String(scale));
-  root.dataset.interfaceScale = String(scalePercent);
+  root.dataset.portraitScale = String(currentPortraitScalePercent());
+  root.dataset.phaseBarScale = String(currentPhaseBarScalePercent());
+  root.dataset.phaseBarLayout = resolvedPhaseBarLayoutNow();
   root.style.top = `${game.settings.get(MODULE_ID, SETTINGS.VERTICAL_OFFSET)}px`;
-  // Chromium/Electron `zoom` scales layout + hitboxes; transform alone would leave a full-size footprint.
-  root.style.zoom = String(scale);
+  // Do not use Chromium zoom on the dock root — it shrinks all hit targets. Portrait visuals scale via CSS vars.
   // Never set an inline z-index — CSS interface-layer variable owns stacking.
   root.innerHTML = `${portraitStageHTML(combatants, state)}${bottomBarHTML(combat, state)}`;
   mountInterfaceElement(root);
@@ -1178,6 +1397,28 @@ export function renderDock() {
   enableDrag(root);
   bindDockEvents(root, combat, state);
   updateOpenPromptDC(state.enemyDC);
+}
+
+/**
+ * Foundry keybinding entry: End Turn for exactly one eligible owned combatant.
+ * Uses the existing requestAction/authority path. Notifies only when explicitly illegal.
+ */
+export async function endCurrentTurnFromKeybinding() {
+  if (isTextEntryTarget(document.activeElement)) return { ok: false, reason: "text-entry" };
+  const combat = getCombat();
+  const state = getState(combat);
+  if (!combat || !state?.enabled) {
+    ui?.notifications?.warn?.(t("NDI.Error.NotActive"));
+    return { ok: false, reason: "not-active" };
+  }
+  const eligible = eligibleOwnedEndTurnCombatants(combat, state);
+  if (eligible.length !== 1) {
+    ui?.notifications?.warn?.(t("NDI.Keybinding.EndCurrentTurn.NotEligible"));
+    return { ok: false, reason: "not-eligible", count: eligible.length };
+  }
+  const combatant = eligible[0];
+  await requestAction(REQUESTS.END_TURN, { combatantId: combatant.id });
+  return { ok: true, combatantId: combatant.id };
 }
 
 function closePrompt(modal) {

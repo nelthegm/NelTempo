@@ -514,6 +514,7 @@ export function currentPortraitSize() {
   return clampNumber(game.settings.get(MODULE_ID, SETTINGS.PORTRAIT_SIZE), 48, 112, 72);
 }
 
+/** @deprecated Prefer currentPortraitScalePercent / currentPhaseBarScalePercent (0.3.4). */
 export function currentInterfaceScalePercent() {
   try {
     return clampNumber(game.settings.get(MODULE_ID, SETTINGS.INTERFACE_SCALE), 50, 100, 100);

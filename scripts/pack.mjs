@@ -29,6 +29,7 @@ const INCLUDE = [
   "scripts/placement-editor.js",
   "scripts/portrait-activation.js",
   "scripts/countdown.js",
+  "scripts/presentation.js",
   "scripts/gm-chat.js",
   "scripts/shields.js",
   "scripts/state.js",

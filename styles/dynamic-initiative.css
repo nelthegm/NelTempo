@@ -16,7 +16,8 @@ body.ndi-suppress-native-tracker .combat-tracker {
   --ndi-bg: rgba(12, 10, 14, 0.94);
   --ndi-panel: rgba(28, 23, 30, 0.94);
   --ndi-muted: #b9b3bd;
-  --ndi-interface-scale: 1;
+  --ndi-portrait-scale: 1;
+  --ndi-phase-bar-scale: 1;
   /*
    * Interface layer: above the canvas / scene HUD peers, below Foundry application
    * windows. Foundry V14 ApplicationV1/V2 windows increment from --z-index-window
@@ -111,9 +112,9 @@ body.ndi-suppress-native-tracker .combat-tracker {
 
 .ndi-portrait {
   position: relative;
-  flex: 0 0 calc(var(--ndi-portrait-size, 72px) + 18px);
-  width: calc(var(--ndi-portrait-size, 72px) + 18px);
-  min-height: calc(var(--ndi-portrait-size, 72px) + 50px);
+  flex: 0 0 calc(var(--ndi-portrait-size, 72px) * var(--ndi-portrait-scale, 1) + 36px);
+  width: calc(var(--ndi-portrait-size, 72px) * var(--ndi-portrait-scale, 1) + 36px);
+  min-height: calc(var(--ndi-portrait-size, 72px) * var(--ndi-portrait-scale, 1) + 56px);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: var(--ndi-panel);
@@ -167,15 +168,15 @@ body.ndi-suppress-native-tracker .combat-tracker {
   display: flex;
   justify-content: center;
   padding: 0 4px 5px;
-  min-height: 26px;
+  min-height: 32px;
 }
 
 .ndi-end-turn-btn,
 .ndi-reopen-turn-btn {
   width: 100%;
-  min-height: 24px;
+  min-height: 32px;
   margin: 0;
-  padding: 3px 6px;
+  padding: 4px 6px;
   border-radius: 5px;
   border: 1px solid rgba(52, 200, 193, 0.75);
   color: #fff;
@@ -277,8 +278,8 @@ body.ndi-suppress-native-tracker .combat-tracker {
 .ndi-image-wrap {
   position: relative;
   display: block;
-  width: var(--ndi-portrait-size, 72px);
-  height: var(--ndi-portrait-size, 72px);
+  width: calc(var(--ndi-portrait-size, 72px) * var(--ndi-portrait-scale, 1));
+  height: calc(var(--ndi-portrait-size, 72px) * var(--ndi-portrait-scale, 1));
   margin: 0 auto;
   overflow: hidden;
   border-radius: 5px;
@@ -348,8 +349,8 @@ body.ndi-suppress-native-tracker .combat-tracker {
 
 .ndi-mini-button,
 .ndi-icon-button {
-  min-width: 24px;
-  min-height: 24px;
+  min-width: 32px;
+  min-height: 32px;
   margin: 0;
   padding: 2px 5px;
   border: 1px solid rgba(255, 255, 255, 0.3);
@@ -361,7 +362,7 @@ body.ndi-suppress-native-tracker .combat-tracker {
 }
 
 .ndi-icon-button {
-  width: 25px;
+  width: 32px;
   padding: 2px;
 }
 
@@ -714,16 +715,17 @@ body.ndi-suppress-native-tracker .combat-tracker {
 }
 
 .ndi-bottom-bar {
+  --ndi-phase-bar-scale: 1;
   width: fit-content;
   max-width: min(var(--ndi-max-width, 62vw), calc(100vw - 360px));
   min-height: 38px;
   margin: 0 auto;
-  padding: 5px 7px;
+  padding: 4px 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 4px;
   color: #f4f0f4;
   background: rgba(12, 10, 14, 0.74);
   border: 1px solid rgba(214, 166, 42, 0.55);
@@ -732,6 +734,98 @@ body.ndi-suppress-native-tracker .combat-tracker {
   backdrop-filter: blur(5px);
   cursor: grab;
   user-select: none;
+  font-size: calc(0.82rem * var(--ndi-phase-bar-scale, 1));
+}
+
+.ndi-bottom-bar.is-compact {
+  gap: 4px;
+  padding: 3px 5px;
+  max-width: min(52vw, calc(100vw - 380px));
+}
+
+.ndi-bottom-bar.is-full {
+  flex-wrap: wrap;
+}
+
+.ndi-compact-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ndi-compact-status .ndi-round-phase {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px 0 2px;
+}
+
+.ndi-overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+.ndi-overflow-toggle {
+  min-width: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  color: #fff;
+  background: rgba(28, 23, 30, 0.94);
+}
+
+.ndi-overflow-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: var(--ndi-interface-z, var(--z-index-app, 30));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 12rem;
+  max-width: min(18rem, 70vw);
+  padding: 6px;
+  border: 1px solid rgba(214, 166, 42, 0.55);
+  border-radius: 8px;
+  background: rgba(12, 10, 14, 0.96);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+.ndi-overflow-menu[hidden] {
+  display: none !important;
+}
+
+.ndi-overflow-menu button,
+.ndi-overflow-menu .ndi-field {
+  width: 100%;
+  min-height: 32px;
+  justify-content: flex-start;
+}
+
+.ndi-gm-controls.is-compact,
+.ndi-active-controls.is-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ndi-gm-controls.is-compact button.ndi-primary,
+.ndi-active-controls.is-compact button.ndi-primary,
+.ndi-bottom-bar button.ndi-primary {
+  min-height: 32px;
+  min-width: 32px;
+}
+
+.ndi-bottom-bar .ndi-gm-controls button,
+.ndi-bottom-bar .ndi-active-controls button {
+  min-height: 32px;
 }
 
 .ndi-bottom-bar:active {

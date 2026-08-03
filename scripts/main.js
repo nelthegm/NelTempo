@@ -1,4 +1,4 @@
-import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
+import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, PHASE_BAR_LAYOUTS, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
 import {
   reconcileLifecycleOnReady,
   reconcileTimingFromConditionHook,
@@ -6,8 +6,16 @@ import {
   socketHandler,
 } from "./controller.js";
 import { isTrackedConditionItem } from "./pf2e-condition-adapter.js";
+import { migrateLegacyInterfaceScale, isTextEntryTarget } from "./presentation.js";
 import { registerRaisedShield } from "./shields.js";
-import { handleInitiativePrompt, removeUI, renderDock, beginNelTempoWithOptionalCountdown, syncNativeCombatTracker } from "./ui.js";
+import {
+  handleInitiativePrompt,
+  removeUI,
+  renderDock,
+  beginNelTempoWithOptionalCountdown,
+  syncNativeCombatTracker,
+  endCurrentTurnFromKeybinding,
+} from "./ui.js";
 import { debug, getCombat, getState } from "./utils.js";
 
 function registerSettings() {
@@ -109,9 +117,28 @@ function registerSettings() {
     default: true,
   });
 
+  // Legacy dock zoom — retained for migration/rollback; hidden from the settings UI.
   game.settings.register(MODULE_ID, SETTINGS.INTERFACE_SCALE, {
     name: "NDI.Setting.InterfaceScale.Name",
     hint: "NDI.Setting.InterfaceScale.Hint",
+    scope: "client",
+    config: false,
+    type: Number,
+    default: 100,
+    range: { min: 50, max: 100, step: 5 },
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.INTERFACE_SCALE_MIGRATED, {
+    name: "Interface Scale Migrated",
+    scope: "client",
+    config: false,
+    type: Boolean,
+    default: false,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.PORTRAIT_SCALE, {
+    name: "NDI.Setting.PortraitScale.Name",
+    hint: "NDI.Setting.PortraitScale.Hint",
     scope: "client",
     config: true,
     type: Number,
@@ -119,6 +146,54 @@ function registerSettings() {
     range: { min: 50, max: 100, step: 5 },
     onChange: renderDock,
   });
+
+  game.settings.register(MODULE_ID, SETTINGS.PHASE_BAR_SCALE, {
+    name: "NDI.Setting.PhaseBarScale.Name",
+    hint: "NDI.Setting.PhaseBarScale.Hint",
+    scope: "client",
+    config: true,
+    type: Number,
+    default: 100,
+    range: { min: 60, max: 100, step: 10 },
+    onChange: renderDock,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.PHASE_BAR_LAYOUT, {
+    name: "NDI.Setting.PhaseBarLayout.Name",
+    hint: "NDI.Setting.PhaseBarLayout.Hint",
+    scope: "client",
+    config: true,
+    type: String,
+    choices: {
+      [PHASE_BAR_LAYOUTS.AUTO]: "NDI.Setting.PhaseBarLayout.Auto",
+      [PHASE_BAR_LAYOUTS.COMPACT]: "NDI.Setting.PhaseBarLayout.Compact",
+      [PHASE_BAR_LAYOUTS.FULL]: "NDI.Setting.PhaseBarLayout.Full",
+    },
+    default: PHASE_BAR_LAYOUTS.AUTO,
+    onChange: renderDock,
+  });
+}
+
+function registerKeybindings() {
+  game.keybindings.register(MODULE_ID, "endCurrentTurn", {
+    name: "NDI.Keybinding.EndCurrentTurn.Name",
+    hint: "NDI.Keybinding.EndCurrentTurn.Hint",
+    editable: [],
+    onDown: () => {
+      void handleEndCurrentTurnKeybinding();
+      return true;
+    },
+  });
+}
+
+async function handleEndCurrentTurnKeybinding() {
+  try {
+    const active = document.activeElement;
+    if (isTextEntryTarget(active)) return;
+    await endCurrentTurnFromKeybinding();
+  } catch (error) {
+    console.error(`${MODULE_ID} | End Turn keybinding failed`, error?.message ?? error);
+  }
 }
 
 function addTrackerLauncher(_app, html) {
@@ -148,6 +223,7 @@ function queueConditionTimingReconcile(item) {
 
 Hooks.once("init", () => {
   registerSettings();
+  registerKeybindings();
   console.info(`${MODULE_TITLE} | Initializing`);
 });
 
@@ -156,6 +232,10 @@ Hooks.once("ready", () => {
     ui.notifications.error("NelTempo requires the Pathfinder Second Edition system.");
     return;
   }
+
+  void migrateLegacyInterfaceScale().then((result) => {
+    if (result?.migrated) debug("Interface scale migrated", { legacy: result.legacy });
+  });
 
   game.socket.on(SOCKET_NAME, socketHandler);
   Hooks.on(`${MODULE_ID}.showPrompt`, handleInitiativePrompt);

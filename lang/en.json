@@ -172,8 +172,26 @@
   "NDI.Setting.PanCameraOnPortrait.Name": "Pan Camera When Activating Portrait",
   "NDI.Setting.PanCameraOnPortrait.Hint": "When enabled, clicking a NelTempo portrait centers your camera on that combatant’s token.",
 
-  "NDI.Setting.InterfaceScale.Name": "NelTempo Interface Scale",
-  "NDI.Setting.InterfaceScale.Hint": "Adjust the size of the NelTempo combat interface for this browser.",
+  "NDI.Setting.InterfaceScale.Name": "NelTempo Interface Scale (legacy)",
+  "NDI.Setting.InterfaceScale.Hint": "Legacy whole-dock zoom. Replaced by Portrait Scale and Phase Bar Scale in 0.3.4; retained for migration only.",
+
+  "NDI.Setting.PortraitScale.Name": "Portrait Scale",
+  "NDI.Setting.PortraitScale.Hint": "Visually scales combatant portrait art for this browser. Control buttons keep a usable click size.",
+  "NDI.Setting.PhaseBarScale.Name": "Phase Bar Scale",
+  "NDI.Setting.PhaseBarScale.Hint": "Scales only the NelTempo phase/status bar for this browser.",
+  "NDI.Setting.PhaseBarLayout.Name": "Phase Bar Layout",
+  "NDI.Setting.PhaseBarLayout.Hint": "Auto chooses Compact when space or bar scale is constrained. Compact shows a primary action plus an overflow menu.",
+  "NDI.Setting.PhaseBarLayout.Auto": "Auto",
+  "NDI.Setting.PhaseBarLayout.Compact": "Compact",
+  "NDI.Setting.PhaseBarLayout.Full": "Full",
+
+  "NDI.Control.MoreActions": "More actions",
+
+  "NDI.Portrait.ActivateAndEditTip": "Left-click: select combatant. Right-click: edit initiative/phase.",
+
+  "NDI.Keybinding.EndCurrentTurn.Name": "NelTempo: End Current Turn",
+  "NDI.Keybinding.EndCurrentTurn.Hint": "Ends the turn for your only eligible owned combatant. Unbound by default.",
+  "NDI.Keybinding.EndCurrentTurn.NotEligible": "No single eligible owned combatant to End Turn.",
 
   "NDI.Chat.StartedTitle": "Dynamic Initiative Started",
   "NDI.Chat.StartedBody": "Set the Enemy Initiative DC, then prompt the players to roll.",

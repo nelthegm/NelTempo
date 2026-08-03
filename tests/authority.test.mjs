@@ -12,12 +12,12 @@ import { SOCKET_ENVELOPE_KEYS, socketPayload } from "../scripts/utils.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.3");
+assert.equal(moduleJson.version, "0.3.4");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.3-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.4-rc1/dynamic-initiative.zip",
 );
 
 assert.equal(isGmEntryRequest(REQUESTS.START), true);
@@ -274,8 +274,9 @@ assert.match(controllerSrc, /NDI\.Error\.GmOnly/);
 // Primary-GM mutation ownership remains in handleGMRequest
 assert.match(controllerSrc, /export async function handleGMRequest[\s\S]*if \(!isPrimaryGM\(\)\) return/);
 
-// Interface scale remains client setting (local-only)
-assert.match(mainSrc, /SETTINGS\.INTERFACE_SCALE/);
+// Portrait / phase-bar scales remain client settings (local-only)
+assert.match(mainSrc, /SETTINGS\.PORTRAIT_SCALE/);
+assert.match(mainSrc, /SETTINGS\.PHASE_BAR_SCALE/);
 assert.match(mainSrc, /scope:\s*"client"/);
 
 console.log("authority.test.mjs: ok");

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4
+
+- Separated Portrait Scale and Phase Bar Scale so shrinking portraits no longer shrinks phase-bar and portrait control hit targets.
+- Added Phase Bar Layout (Auto / Compact / Full) with a compact GM primary action and overflow menu for uncommon controls.
+- Player phase bar shows End Turn for an eligible owned combatant without GM recovery controls.
+- GM right-click on a portrait opens the initiative/phase placement editor; left-click still selects/controls the token.
+- Added optional unbound Foundry keybinding “NelTempo: End Current Turn”.
+- Migrates legacy Interface Scale into the new scale settings once per client; the legacy key remains for rollback and is hidden from the settings UI.
+- No combat lifecycle, authority, socket, countdown, or timing behavior changes.
+
 ## 0.3.3
 
 - Added authoritative GM checks for starting Dynamic Initiative and prompting initiative.

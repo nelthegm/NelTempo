@@ -16,7 +16,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // --- Baseline / tag / version ---
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.3");
+assert.equal(moduleJson.version, "0.3.4");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");
@@ -45,7 +45,9 @@ const mainSrc = readFileSync(join(root, "scripts/main.js"), "utf8");
 assert.match(mainSrc, /PAN_CAMERA_ON_PORTRAIT/);
 assert.match(mainSrc, /scope:\s*"client"/);
 assert.match(mainSrc, /default:\s*true/);
-assert.equal(mainSrc.includes("migrate"), false);
+assert.equal(mainSrc.includes("migrateData"), false);
+assert.equal(/PAN_CAMERA[\s\S]{0,200}migrate/i.test(mainSrc), false);
+
 
 const constantsSrc = readFileSync(join(root, "scripts/constants.js"), "utf8");
 assert.match(constantsSrc, /nel-dynamic-initiative/);

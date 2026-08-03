@@ -16,9 +16,29 @@ export const SETTINGS = Object.freeze({
   ENFORCE_CONDITION_TIMING: "enforceConditionTiming",
   /** Client: pan camera when activating a portrait token */
   PAN_CAMERA_ON_PORTRAIT: "panCameraOnPortraitActivation",
-  /** Client: overall NelTempo dock scale percent 50–100 */
+  /**
+   * Legacy client dock zoom (50–100). Kept for migration / rollback; hidden from config.
+   * Prefer PORTRAIT_SCALE + PHASE_BAR_SCALE.
+   */
   INTERFACE_SCALE: "interfaceScale",
+  /** Client: visual scale of portrait art/content only (50–100). */
+  PORTRAIT_SCALE: "portraitScale",
+  /** Client: phase/status bar presentation scale (60–100). */
+  PHASE_BAR_SCALE: "phaseBarScale",
+  /** Client: auto | compact | full phase bar layout. */
+  PHASE_BAR_LAYOUT: "phaseBarLayout",
+  /** One-shot client migration from INTERFACE_SCALE → portrait/phase scales. */
+  INTERFACE_SCALE_MIGRATED: "interfaceScaleMigratedV034",
 });
+
+export const PHASE_BAR_LAYOUTS = Object.freeze({
+  AUTO: "auto",
+  COMPACT: "compact",
+  FULL: "full",
+});
+
+/** Minimum CSS-pixel hit target for important portrait / bar controls. */
+export const MIN_CONTROL_HIT_PX = 32;
 
 export const AUTO_ADVANCE = Object.freeze({
   OFF: "off",
