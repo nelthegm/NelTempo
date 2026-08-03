@@ -514,6 +514,14 @@ export function currentPortraitSize() {
   return clampNumber(game.settings.get(MODULE_ID, SETTINGS.PORTRAIT_SIZE), 48, 112, 72);
 }
 
+export function currentInterfaceScalePercent() {
+  try {
+    return clampNumber(game.settings.get(MODULE_ID, SETTINGS.INTERFACE_SCALE), 50, 100, 100);
+  } catch (_error) {
+    return 100;
+  }
+}
+
 export function socketPayload(type, data = {}) {
   return { type, userId: game.user.id, sentAt: Date.now(), ...data };
 }

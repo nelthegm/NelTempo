@@ -454,7 +454,7 @@ assert.equal(REQUESTS.END_REMAINING, "end-remaining");
 
 // Module version
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.1");
+assert.equal(moduleJson.version, "0.3.2");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 
 // Localization keys exist
@@ -469,7 +469,7 @@ assert.ok(lang["NDI.Placement.Edit"]);
 // Schema default includes lifecycle null
 const fresh = createState();
 assert.equal(fresh.lifecycle, null);
-assert.equal(fresh.schema, 4);
+assert.equal(fresh.schema, 5);
 
 // attachLifecycle helper
 const attached = attachLifecycle(fresh, createLifecycle({ phase: PHASES.ENEMY, round: 1, roster: [] }));

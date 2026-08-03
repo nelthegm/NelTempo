@@ -1,4 +1,9 @@
-import { AUTO_ADVANCE, MODULE_ID, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
+import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
+import {
+  buildCountdownFromPrompt,
+  rebuildCountdown,
+} from "./countdown.js";
+import { createGmOnlyChat } from "./gm-chat.js";
 import {
   PHASES,
   beginRoundTransition,
@@ -108,7 +113,11 @@ const phaseTransitionLocks = new Map();
 const autoAdvancePrompted = new Set();
 
 function publicChat(content) {
-  return ChatMessage.create({ content, speaker: { alias: "NelTempo" } });
+  return ChatMessage.create({ content, speaker: { alias: MODULE_TITLE } });
+}
+
+function gmOnlyChat(content) {
+  return createGmOnlyChat(content);
 }
 
 function delayBlockMessage(blockReason) {
@@ -563,7 +572,7 @@ async function transitionToPhase(combat, state, targetPhase, { force = false } =
 /*  Core request handlers                       */
 /* -------------------------------------------- */
 
-async function startDynamicInitiative() {
+async function startDynamicInitiative(payload = {}) {
   const combat = await ensureCombat();
   if (!combat) return;
   const existing = getState(combat);
@@ -577,12 +586,39 @@ async function startDynamicInitiative() {
     enemyDC: defaultEnemyDC(combat),
     suggestedSkill: "last-used",
   });
+  const countdown = buildCountdownFromPrompt(payload.countdownLabel, payload.countdownRounds, {
+    currentRound: state.round,
+    userId: game.user?.id ?? null,
+  });
+  if (countdown) state.countdown = countdown;
+
   await persistState(combat, state, "start");
   await mustUpdateCombat(combat, { round: state.round, turn: null });
   await resetPartyNativeInitiative(combat);
-  await publicChat(
-    `<h3>Dynamic Initiative Started</h3><p>Set the Enemy Initiative DC, then prompt the players to roll.</p>`,
+  await gmOnlyChat(
+    `<h3>${localize("NDI.Chat.StartedTitle")}</h3><p>${localize("NDI.Chat.StartedBody")}</p>`,
   );
+}
+
+async function setCountdown(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const live = getState(combat) ?? state;
+  let next = withHistory(live, "Set encounter countdown");
+  if (payload.clear) {
+    next.countdown = null;
+  } else {
+    const rebuilt = rebuildCountdown(payload.label ?? live.countdown?.label, payload.rounds, {
+      currentRound: live.round,
+      userId: requestUser.id,
+    });
+    if (!rebuilt) throw new Error(localize("NDI.Countdown.Invalid"));
+    next.countdown = rebuilt;
+  }
+  await persistState(combat, next, "countdown-set");
+}
+
+async function clearCountdown(combat, state, payload, requestUser) {
+  return setCountdown(combat, state, { ...payload, clear: true }, requestUser);
 }
 
 async function promptInitiative(combat, state) {
@@ -1661,7 +1697,7 @@ export async function reconcileTimingFromConditionHook(item) {
 
 async function dispatchGMRequest(payload) {
   const requestUser = validateRequestUser(payload);
-  if (payload.type === REQUESTS.START) return await startDynamicInitiative();
+  if (payload.type === REQUESTS.START) return await startDynamicInitiative(payload);
 
   const combat = game.combats.get(payload.combatId) ?? getCombat();
   const state = getState(combat);
@@ -1744,6 +1780,12 @@ async function dispatchGMRequest(payload) {
       return await placementQueue(combat, state, payload, requestUser);
     case REQUESTS.PLACEMENT_CANCEL_QUEUE:
       return await placementCancelQueue(combat, state, payload, requestUser);
+    case REQUESTS.COUNTDOWN_SET:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await setCountdown(combat, state, payload, requestUser);
+    case REQUESTS.COUNTDOWN_CLEAR:
+      if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+      return await clearCountdown(combat, state, payload, requestUser);
     default:
       throw new Error(`Unknown NelTempo request: ${payload.type}`);
   }

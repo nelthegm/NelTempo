@@ -25,6 +25,7 @@
   "NDI.Control.Roll": "Roll",
   "NDI.Control.MarkComplete": "Mark turn complete",
   "NDI.Control.RestoreTurn": "Restore turn",
+  "NDI.Control.Start": "Start NelTempo",
 
   "NDI.Lifecycle.PhaseComplete": "Phase Complete",
   "NDI.Lifecycle.EndedProgress": "Ended {ended} / {total}",
@@ -169,5 +170,24 @@
   "NDI.Portrait.CanvasNotReady": "Canvas is not ready.",
 
   "NDI.Setting.PanCameraOnPortrait.Name": "Pan Camera When Activating Portrait",
-  "NDI.Setting.PanCameraOnPortrait.Hint": "When enabled, clicking a NelTempo portrait centers your camera on that combatant’s token."
+  "NDI.Setting.PanCameraOnPortrait.Hint": "When enabled, clicking a NelTempo portrait centers your camera on that combatant’s token.",
+
+  "NDI.Setting.InterfaceScale.Name": "NelTempo Interface Scale",
+  "NDI.Setting.InterfaceScale.Hint": "Adjust the size of the NelTempo combat interface for this browser.",
+
+  "NDI.Chat.StartedTitle": "Dynamic Initiative Started",
+  "NDI.Chat.StartedBody": "Set the Enemy Initiative DC, then prompt the players to roll.",
+
+  "NDI.Countdown.Label": "Countdown Label",
+  "NDI.Countdown.LabelPlaceholder": "Reinforcements",
+  "NDI.Countdown.Rounds": "Rounds Until Event",
+  "NDI.Countdown.RoundsFromNow": "Rounds from now",
+  "NDI.Countdown.StartHint": "Optional public encounter countdown. Leave blank to skip.",
+  "NDI.Countdown.Edit": "Edit Encounter Countdown",
+  "NDI.Countdown.Add": "Add Countdown",
+  "NDI.Countdown.Save": "Save Countdown",
+  "NDI.Countdown.Clear": "Clear Countdown",
+  "NDI.Countdown.Invalid": "Enter a label and rounds between 1 and 99.",
+
+  "NDI.Portrait.TokenSelected": "Token Selected"
 }

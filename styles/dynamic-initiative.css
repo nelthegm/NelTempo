@@ -16,6 +16,7 @@ body.ndi-suppress-native-tracker .combat-tracker {
   --ndi-bg: rgba(12, 10, 14, 0.94);
   --ndi-panel: rgba(28, 23, 30, 0.94);
   --ndi-muted: #b9b3bd;
+  --ndi-interface-scale: 1;
   /*
    * Interface layer: above the canvas / scene HUD peers, below Foundry application
    * windows. Foundry V14 ApplicationV1/V2 windows increment from --z-index-window
@@ -40,6 +41,13 @@ body.ndi-suppress-native-tracker .combat-tracker {
   overflow: hidden;
   backdrop-filter: blur(6px);
   font-family: var(--font-primary, "Signika", sans-serif);
+}
+
+@media (max-width: 900px) {
+  #ndi-dock {
+    max-width: calc(100vw - 24px);
+    min-width: 280px;
+  }
 }
 
 .ndi-header {
@@ -738,6 +746,107 @@ body.ndi-suppress-native-tracker .combat-tracker {
   letter-spacing: 0.025em;
   white-space: nowrap;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+}
+
+.ndi-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.ndi-countdown-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(18rem, 42vw);
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(214, 166, 42, 0.75);
+  border-radius: 999px;
+  background: rgba(72, 48, 12, 0.88);
+  color: #ffe7a8;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: default;
+  box-shadow: none;
+}
+
+button.ndi-countdown-pill {
+  cursor: pointer;
+}
+
+.ndi-countdown-pill.is-empty {
+  opacity: 0.85;
+  border-style: dashed;
+}
+
+.ndi-countdown-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ndi-countdown-pill.is-now {
+  border-color: rgba(255, 120, 72, 0.95);
+  background: rgba(92, 28, 18, 0.92);
+  color: #ffd7c4;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ndi-countdown-pill.is-now {
+    animation: ndi-countdown-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes ndi-countdown-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 120, 72, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(255, 120, 72, 0.28);
+  }
+}
+
+.ndi-portrait.is-token-controlled {
+  outline: 2px solid rgba(92, 180, 255, 0.95);
+  outline-offset: 1px;
+}
+
+.ndi-token-selected {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(12, 24, 40, 0.9);
+  border: 1px solid rgba(92, 180, 255, 0.95);
+  color: #b8e0ff;
+  font-size: 0.55rem;
+  pointer-events: none;
+}
+
+.ndi-countdown-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: min(22rem, 90vw);
+}
+
+.ndi-countdown-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-weight: 700;
 }
 
 .ndi-bottom-bar .ndi-gm-controls,

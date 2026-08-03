@@ -1,4 +1,4 @@
-# NelTempo v0.3.1 — Playtest Checklist
+# NelTempo v0.3.2 — Playtest Checklist
 
 *Formerly Dynamic Initiative.* Use a copied world or make a world backup before the first test. Disable Combat Carousel and leave PF2e Workbench enabled.
 
@@ -109,6 +109,15 @@ See `docs/SLICE_0_3_1_TEST_PLAN.md`.
 - [ ] Player unauthorized token: permission notification; prior control preserved.
 - [ ] End Turn / Delay / placement editor clicks do not also activate the token.
 - [ ] Keyboard Enter/Space on portrait; hover highlight still works; sheets remain above NelTempo.
+
+## Interface scale, countdown, GM chat (0.3.2)
+
+- [ ] As a player, confirm the Dynamic Initiative Started chat message is not visible; as GM it is.
+- [ ] Set NelTempo Interface Scale to 75% and 50%; dock shrinks as one unit; controls remain clickable.
+- [ ] Start NelTempo with countdown label “Reinforcements” and 3 rounds; pill shows “Reinforcements: 3 Rounds”.
+- [ ] Advance rounds; count derives correctly to 1 Round then NOW; remains NOW afterward.
+- [ ] GM edits/clears countdown; players see updates without reload.
+- [ ] Control a token; its portrait shows the Token Selected indicator; Active/Ready labels unchanged.
 
 ## Rearguard and Next Round
 

@@ -28,6 +28,8 @@ const INCLUDE = [
   "scripts/pf2e-lifecycle-adapter.js",
   "scripts/placement-editor.js",
   "scripts/portrait-activation.js",
+  "scripts/countdown.js",
+  "scripts/gm-chat.js",
   "scripts/shields.js",
   "scripts/state.js",
   "scripts/timing.js",

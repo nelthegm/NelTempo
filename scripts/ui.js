@@ -1,5 +1,6 @@
 import { MODULE_ID, REQUESTS, SETTINGS } from "./constants.js";
 import { getPlacementEditorProjection, requestAction } from "./controller.js";
+import { formatCountdownDisplay, sanitizeCountdown } from "./countdown.js";
 import { rollDynamicInitiative } from "./initiative.js";
 import {
   canEndTurn,
@@ -22,6 +23,7 @@ import {
   activePlayerOwners,
   combatantName,
   combatantSide,
+  currentInterfaceScalePercent,
   currentPortraitSize,
   escapeHTML,
   getCombat,
@@ -233,7 +235,26 @@ function portraitClasses(combatant, state) {
   if (badge === "waiting-confused") classes.push("is-waiting-priority");
   if (badge?.startsWith("delay-blocked")) classes.push("is-delay-blocked");
   if (badge === "gm-override" || badge === "resume-allowed") classes.push("is-timing-override");
+  if (isLocallyControlledCombatant(combatant)) classes.push("is-token-controlled");
   return classes.join(" ");
+}
+
+/**
+ * Exact scene/token pair currently controlled by this client.
+ */
+function isLocallyControlledCombatant(combatant) {
+  try {
+    const canvasRef = canvas;
+    if (!canvasRef?.ready || !canvasRef.scene) return false;
+    const tokenId = combatant.tokenId ?? combatant.token?.id;
+    const sceneId = combatant.sceneId ?? combatant.token?.parent?.id ?? combatant.token?.scene?.id;
+    if (!tokenId || !sceneId) return false;
+    if (String(canvasRef.scene.id) !== String(sceneId)) return false;
+    const controlled = canvasRef.tokens?.controlled ?? [];
+    return controlled.some((token) => token?.id === tokenId && !token.destroyed);
+  } catch (_error) {
+    return false;
+  }
 }
 
 function portraitHTML(combatant, state) {
@@ -338,6 +359,7 @@ function portraitHTML(combatant, state) {
         ${resultBadge}
         ${endedBadge}
         ${timingBadge}
+        ${isLocallyControlledCombatant(combatant) ? `<span class="ndi-token-selected" title="${escapeHTML(t("NDI.Portrait.TokenSelected"))}" aria-label="${escapeHTML(t("NDI.Portrait.TokenSelected"))}"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></span>` : ""}
       </span>
       <span class="ndi-name">${escapeHTML(combatantName(combatant))}</span>
       <span class="ndi-status">${escapeHTML(statusFor(combatant, state))}</span>
@@ -439,13 +461,37 @@ function phaseProgressHTML(combat, state) {
   </div>`;
 }
 
+function countdownPillHTML(state) {
+  const display = formatCountdownDisplay(state.countdown, state.round);
+  if (!display) {
+    if (!game.user.isGM) return "";
+    return `<button type="button" class="ndi-countdown-pill is-empty" data-action="edit-countdown" title="${escapeHTML(t("NDI.Countdown.Add"))}" aria-label="${escapeHTML(t("NDI.Countdown.Add"))}">
+      <i class="fa-solid fa-hourglass-start" aria-hidden="true"></i>
+      <span>${escapeHTML(t("NDI.Countdown.Add"))}</span>
+    </button>`;
+  }
+  const nowClass = display.isNow ? " is-now" : "";
+  const interactive = game.user.isGM
+    ? ` data-action="edit-countdown" title="${escapeHTML(display.text)}" aria-label="${escapeHTML(t("NDI.Countdown.Edit"))}: ${escapeHTML(display.text)}"`
+    : ` title="${escapeHTML(display.text)}" aria-label="${escapeHTML(display.text)}"`;
+  const tag = game.user.isGM ? "button" : "div";
+  const typeAttr = game.user.isGM ? ' type="button"' : "";
+  return `<${tag}${typeAttr} class="ndi-countdown-pill${nowClass}"${interactive}>
+      <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
+      <span class="ndi-countdown-text">${escapeHTML(display.text)}</span>
+    </${tag}>`;
+}
+
 function bottomBarHTML(combat, state) {
   const reactionNote = state.phase === PHASES.ENEMY
     ? '<span class="ndi-reaction-note"><i class="fa-solid fa-shield-halved"></i> Reactions resolve normally</span>'
     : "";
   const dc = state.phase === PHASES.INITIATIVE ? ` · Enemy DC ${state.enemyDC}` : "";
   return `<footer class="ndi-bottom-bar ndi-drag-handle" title="Drag to move; double-click to reset">
-    <div class="ndi-round-phase">Round ${state.round} · ${phaseLabel(state.phase)} Phase${dc}</div>
+    <div class="ndi-status-row">
+      <div class="ndi-round-phase">Round ${state.round} · ${phaseLabel(state.phase)} Phase${dc}</div>
+      ${countdownPillHTML(state)}
+    </div>
     ${phaseProgressHTML(combat, state)}
     ${reactionNote}
     ${playerActiveControlsHTML(combat, state)}
@@ -844,6 +890,10 @@ function bindDockEvents(root, combat, state) {
         }
         break;
       }
+      case "edit-countdown":
+        event.stopPropagation();
+        if (game.user.isGM) await openCountdownEditor(state);
+        break;
       case "claim":
         if (!target.disabled && state.phase !== PHASES.INITIATIVE) await requestAction(REQUESTS.CLAIM, { combatantId });
         break;
@@ -991,8 +1041,106 @@ function createLauncher() {
   button.id = LAUNCHER_ID;
   button.type = "button";
   button.innerHTML = `<i class="fa-solid fa-bolt"></i> ${escapeHTML(t("NDI.Title"))}`;
-  button.addEventListener("click", () => requestAction(REQUESTS.START));
+  button.addEventListener("click", () => void beginNelTempoWithOptionalCountdown());
   mountInterfaceElement(button);
+}
+
+/**
+ * Optional countdown fields before starting NelTempo.
+ */
+export async function beginNelTempoWithOptionalCountdown() {
+  if (!game.user.isGM) return;
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) {
+    await requestAction(REQUESTS.START, {});
+    return;
+  }
+
+  const result = await DialogV2.wait({
+    window: { title: t("NDI.Title") },
+    content: `<form class="ndi-countdown-form">
+      <p>${escapeHTML(t("NDI.Countdown.StartHint"))}</p>
+      <label>${escapeHTML(t("NDI.Countdown.Label"))}
+        <input type="text" name="countdownLabel" maxlength="80" placeholder="${escapeHTML(t("NDI.Countdown.LabelPlaceholder"))}">
+      </label>
+      <label>${escapeHTML(t("NDI.Countdown.Rounds"))}
+        <input type="number" name="countdownRounds" min="1" max="99" step="1" placeholder="3">
+      </label>
+    </form>`,
+    buttons: [
+      {
+        action: "start",
+        label: t("NDI.Control.Start"),
+        default: true,
+        callback: (_event, button) => readNamedFormFields(button, ["countdownLabel", "countdownRounds"]),
+      },
+      { action: "cancel", label: t("NDI.Placement.Close") },
+    ],
+  });
+
+  if (!result || result === "cancel") return;
+  await requestAction(REQUESTS.START, {
+    countdownLabel: result.countdownLabel,
+    countdownRounds: result.countdownRounds,
+  });
+}
+
+function readNamedFormFields(button, names) {
+  const el = button?.element ?? button;
+  const form =
+    button?.form ??
+    el?.closest?.("form") ??
+    el?.closest?.(".application")?.querySelector?.("form.ndi-countdown-form") ??
+    document.querySelector("form.ndi-countdown-form");
+  const out = {};
+  for (const name of names) out[name] = "";
+  if (!form) return out;
+  const data = new FormData(form);
+  for (const name of names) out[name] = String(data.get(name) ?? "");
+  return out;
+}
+
+async function openCountdownEditor(state) {
+  if (!game.user.isGM) return;
+  const existing = sanitizeCountdown(state.countdown);
+  const display = formatCountdownDisplay(existing, state.round);
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) return;
+
+  const result = await DialogV2.wait({
+    window: { title: t("NDI.Countdown.Edit") },
+    content: `<form class="ndi-countdown-form">
+      <label>${escapeHTML(t("NDI.Countdown.Label"))}
+        <input type="text" name="label" maxlength="80" value="${escapeHTML(existing?.label ?? "")}" placeholder="${escapeHTML(t("NDI.Countdown.LabelPlaceholder"))}">
+      </label>
+      <label>${escapeHTML(t("NDI.Countdown.RoundsFromNow"))}
+        <input type="number" name="rounds" min="1" max="99" step="1" value="${display && !display.isNow ? display.remaining : 3}">
+      </label>
+    </form>`,
+    buttons: [
+      {
+        action: "save",
+        label: t("NDI.Countdown.Save"),
+        default: true,
+        callback: (_event, button) => readNamedFormFields(button, ["label", "rounds"]),
+      },
+      {
+        action: "clear",
+        label: t("NDI.Countdown.Clear"),
+      },
+      { action: "cancel", label: t("NDI.Placement.Close") },
+    ],
+  });
+
+  if (!result || result === "cancel") return;
+  if (result === "clear") {
+    await requestAction(REQUESTS.COUNTDOWN_CLEAR, {});
+    return;
+  }
+  await requestAction(REQUESTS.COUNTDOWN_SET, {
+    label: result.label,
+    rounds: result.rounds,
+  });
 }
 
 export function renderDock() {
@@ -1014,9 +1162,15 @@ export function renderDock() {
   const combatants = phaseCombatants(combat, state);
   const root = document.createElement("section");
   root.id = DOCK_ID;
+  const scalePercent = currentInterfaceScalePercent();
+  const scale = scalePercent / 100;
   root.style.setProperty("--ndi-portrait-size", `${currentPortraitSize()}px`);
   root.style.setProperty("--ndi-max-width", `${game.settings.get(MODULE_ID, SETTINGS.MAX_WIDTH)}vw`);
+  root.style.setProperty("--ndi-interface-scale", String(scale));
+  root.dataset.interfaceScale = String(scalePercent);
   root.style.top = `${game.settings.get(MODULE_ID, SETTINGS.VERTICAL_OFFSET)}px`;
+  // Chromium/Electron `zoom` scales layout + hitboxes; transform alone would leave a full-size footprint.
+  root.style.zoom = String(scale);
   // Never set an inline z-index — CSS interface-layer variable owns stacking.
   root.innerHTML = `${portraitStageHTML(combatants, state)}${bottomBarHTML(combat, state)}`;
   mountInterfaceElement(root);

@@ -7,6 +7,7 @@ import {
   normalizePlacements,
   placementForCurrentRound,
 } from "./placement-editor.js";
+import { sanitizeCountdown } from "./countdown.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -32,7 +33,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -67,6 +68,8 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     placementCorrections: {},
     /** Capped placement audit trail. */
     placementAudit: [],
+    /** Optional public encounter countdown (schema 5). */
+    countdown: null,
     history: [],
   };
 }
@@ -205,6 +208,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     placements: {},
     placementCorrections: {},
     placementAudit: [],
+    countdown: null,
     history: [],
   };
 
@@ -249,6 +253,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     combatantIds: idSet,
   });
   next.placementAudit = normalizePlacementAudit(source.placementAudit);
+  next.countdown = sanitizeCountdown(source.countdown);
 
   // Lifecycle: normalize and prune roster against current combatants.
   // Never invent a lifecycle for Initiative; preserve open/ending instances.
@@ -363,6 +368,8 @@ export function beginRoundTransition(state) {
   next.placements = {};
   // Preserve queue across the clear, then consume entries for the new round.
   next.placementCorrections = structuredClone(state.placementCorrections ?? {});
+  // Countdown is round-derived; preserve the structured record across rounds.
+  next.countdown = sanitizeCountdown(state.countdown);
   return consumeQueuedCorrections(next);
 }
 

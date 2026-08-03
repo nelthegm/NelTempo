@@ -73,6 +73,8 @@ placementAudit: [ { event, at, …short ids… } ]
 
 Portrait activation (0.3.1) is **not** combat state: see `docs/SLICE_0_3_1_PORTRAIT_ACTIVATION.md`. It uses client-local `Token#control` / camera pan only.
 
+Schema **5** (0.3.2) adds optional `countdown: { label, triggerRound, createdRound, createdBy }` — remaining display is derived from `triggerRound - currentRound`. Client interface scale and token-selected indicators are local-only.
+
 See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 
 Combatant identity is always the Foundry **combatant document id**, never display names.

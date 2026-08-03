@@ -23,6 +23,8 @@ for (const file of [
   "scripts/timing-service.js",
   "scripts/placement-editor.js",
   "scripts/portrait-activation.js",
+  "scripts/countdown.js",
+  "scripts/gm-chat.js",
 ]) {
   execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" });
 }

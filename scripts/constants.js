@@ -16,6 +16,8 @@ export const SETTINGS = Object.freeze({
   ENFORCE_CONDITION_TIMING: "enforceConditionTiming",
   /** Client: pan camera when activating a portrait token */
   PAN_CAMERA_ON_PORTRAIT: "panCameraOnPortraitActivation",
+  /** Client: overall NelTempo dock scale percent 50–100 */
+  INTERFACE_SCALE: "interfaceScale",
 });
 
 export const AUTO_ADVANCE = Object.freeze({
@@ -57,4 +59,6 @@ export const REQUESTS = Object.freeze({
   PLACEMENT_APPLY: "placement-apply",
   PLACEMENT_QUEUE: "placement-queue",
   PLACEMENT_CANCEL_QUEUE: "placement-cancel-queue",
+  COUNTDOWN_SET: "countdown-set",
+  COUNTDOWN_CLEAR: "countdown-clear",
 });

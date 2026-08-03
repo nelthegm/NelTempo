@@ -7,7 +7,7 @@ import {
 } from "./controller.js";
 import { isTrackedConditionItem } from "./pf2e-condition-adapter.js";
 import { registerRaisedShield } from "./shields.js";
-import { handleInitiativePrompt, removeUI, renderDock, syncNativeCombatTracker } from "./ui.js";
+import { handleInitiativePrompt, removeUI, renderDock, beginNelTempoWithOptionalCountdown, syncNativeCombatTracker } from "./ui.js";
 import { debug, getCombat, getState } from "./utils.js";
 
 function registerSettings() {
@@ -108,6 +108,17 @@ function registerSettings() {
     type: Boolean,
     default: true,
   });
+
+  game.settings.register(MODULE_ID, SETTINGS.INTERFACE_SCALE, {
+    name: "NDI.Setting.InterfaceScale.Name",
+    hint: "NDI.Setting.InterfaceScale.Hint",
+    scope: "client",
+    config: true,
+    type: Number,
+    default: 100,
+    range: { min: 50, max: 100, step: 5 },
+    onChange: renderDock,
+  });
 }
 
 function addTrackerLauncher(_app, html) {
@@ -123,7 +134,7 @@ function addTrackerLauncher(_app, html) {
   button.type = "button";
   button.className = "ndi-tracker-launch";
   button.innerHTML = `<i class="fa-solid fa-bolt"></i> Start ${MODULE_TITLE}`;
-  button.addEventListener("click", () => requestAction(REQUESTS.START));
+  button.addEventListener("click", () => void beginNelTempoWithOptionalCountdown());
   root.prepend(button);
 }
 

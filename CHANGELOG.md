@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+- Dynamic Initiative start instructions are now GM-only.
+- Added a client-local 50%–100% NelTempo interface scale.
+- Added optional public encounter countdowns configured by the GM.
+- Added a local portrait indicator for the currently controlled token.
+
 ## 0.3.1
 
 - Portrait clicks activate the combatant’s exact canvas token locally, releasing the user’s other controlled tokens first.
