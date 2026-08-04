@@ -8,7 +8,9 @@
 - GM right-click on a portrait opens the initiative/phase placement editor; left-click still selects/controls the token.
 - Added optional unbound Foundry keybinding “NelTempo: End Current Turn”.
 - Migrates legacy Interface Scale into the new scale settings once per client; the legacy key remains for rollback and is hidden from the settings UI.
-- No combat lifecycle, authority, socket, countdown, or timing behavior changes.
+- Includes GM request authority and socket-envelope hardening from the 0.3.3 development cycle.
+- Runtime accepted on Foundry 14.365 and PF2e 8.4.0.
+- No combat lifecycle, authority, socket, countdown, or timing behavior changes beyond the presentation and authority hardening already shipped.
 
 ## 0.3.3
 

@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel. The current packaged candidate is **NelTempo 0.3.4** (compact / accessible combat interface). Foundry V14 / PF2e 8.4.0 runtime acceptance for 0.3.4 is not yet claimed. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.4**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. Separate portrait and phase-bar scaling, compact/full/auto layouts, GM right-click placement editing, and the optional End Turn keybinding are included. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.4-rc1/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.4/dynamic-initiative.zip
 ```
 
 ### Manual ZIP install
