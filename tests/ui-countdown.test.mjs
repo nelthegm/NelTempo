@@ -21,12 +21,12 @@ import { beginRoundTransition, createState, normalizeState } from "../scripts/st
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.4");
+assert.equal(moduleJson.version, "0.3.5");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.4/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip",
 );
 assert.equal(SETTINGS.INTERFACE_SCALE, "interfaceScale");
 assert.equal(REQUESTS.COUNTDOWN_SET, "countdown-set");
@@ -138,7 +138,7 @@ assert.equal(remainingCountdownRounds(built, 2), remainingCountdownRounds(built,
 
 // Persist across normalize / round transition
 let state = createState({ round: 1 });
-assert.equal(state.schema, 5);
+assert.equal(state.schema, 6);
 state.countdown = built;
 state = normalizeState(state, { combatantIds: [] });
 assert.equal(state.countdown.label, "Reinforcements");

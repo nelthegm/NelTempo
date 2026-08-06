@@ -2,7 +2,7 @@
   "id": "nel-dynamic-initiative",
   "title": "NelTempo",
   "description": "NelTempo (formerly Dynamic Initiative): a portrait-driven, four-phase initiative controller for Pathfinder Second Edition — Initiative, Vanguard, Enemy, and Rearguard — with condition timing and a GM initiative/phase placement editor.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "authors": [
     {
       "name": "Nelson Cruz"
@@ -50,6 +50,6 @@
   "changelog": "CHANGELOG.md",
   "url": "https://github.com/nelthegm/NelTempo",
   "manifest": "https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json",
-  "download": "https://github.com/nelthegm/NelTempo/releases/download/v0.3.4/dynamic-initiative.zip",
+  "download": "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip",
   "bugs": "https://github.com/nelthegm/NelTempo/issues"
 }

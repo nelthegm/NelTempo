@@ -4,6 +4,8 @@ import {
   MODULE_ID,
   REQUESTS,
   SETTINGS,
+  TURN_LIFECYCLE_AUTOMATION,
+  PHASE_LIFECYCLE_SUMMARY,
 } from "../scripts/constants.js";
 import {
   BOUNDARY_STATUS,
@@ -14,6 +16,7 @@ import {
   buildRosterIds,
   canEndTurn,
   canReopenTurn,
+  combatantLifecycleUiStatus,
   completeEndBoundary,
   completeStartBoundary,
   createLifecycle,
@@ -27,9 +30,11 @@ import {
   markCombatantStartResult,
   markTurnEnded,
   normalizeLifecycle,
+  phaseAdvanceReady,
   reopenTurn,
   skipFailedEnds,
   skipFailedStarts,
+  skipPendingEnds,
   skipRemainingTurns,
   startCandidates,
   undoCrossesPhaseEnd,
@@ -193,8 +198,21 @@ assert.equal(endedAgain.reason, "already-ended");
 const concurrent = markTurnEnded(ended1.state, "ownerPc", { userId: "user2" });
 assert.equal(concurrent.changed, false);
 
-// End Turn does not invoke native processing (no adapter call here — state only)
+// End Turn mark helper does not claim the native end boundary by itself
 assert.equal(ended1.state.lifecycle.turns.ownerPc.endStatus, BOUNDARY_STATUS.PENDING);
+
+// Composed end path: mark end complete then mark turn ended
+endState.lifecycle.turns.ownerPc.startStatus = BOUNDARY_STATUS.COMPLETED;
+endState.lifecycle.turns.otherPc.startStatus = BOUNDARY_STATUS.COMPLETED;
+assert.equal(canEndTurn(endState.lifecycle, "ownerPc"), true);
+assert.equal(canEndTurn(endState.lifecycle, "otherPc"), true);
+let composed = markCombatantEndProcessing(endState, "ownerPc");
+composed = markCombatantEndResult(composed, "ownerPc", { ok: true });
+const composedEnded = markTurnEnded(composed, "ownerPc", { userId: "user1" });
+assert.equal(composedEnded.state.lifecycle.turns.ownerPc.endStatus, BOUNDARY_STATUS.COMPLETED);
+assert.equal(composedEnded.state.lifecycle.turns.ownerPc.ended, true);
+assert.equal(canReopenTurn(composedEnded.state.lifecycle, "ownerPc"), false);
+assert.equal(phaseAdvanceReady(composedEnded.state.lifecycle), false);
 
 // Not in roster rejected
 const notRoster = markTurnEnded(ended1.state, "stranger", { userId: "user1" });
@@ -262,7 +280,11 @@ const skipped = skipRemainingTurns(forceState, { userId: "gm" });
 assert.equal(skipped.changed, true);
 assert.deepEqual(skipped.skipped, ["b"]);
 assert.equal(skipped.state.lifecycle.turns.b.skipped, true);
+assert.equal(skipped.state.lifecycle.turns.b.endStatus, BOUNDARY_STATUS.SKIPPED);
 assert.equal(skipped.state.lifecycle.status, LIFECYCLE_STATUS.COMPLETE);
+
+const pendingEnds = skipPendingEnds(forceState, { reason: "test-skip" });
+assert.equal(pendingEnds.state.lifecycle.turns.a.endStatus, BOUNDARY_STATUS.SKIPPED);
 
 // --- End boundary once ---
 let endBound = createState();
@@ -454,7 +476,7 @@ assert.equal(REQUESTS.END_REMAINING, "end-remaining");
 
 // Module version
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.4");
+assert.equal(moduleJson.version, "0.3.5");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 
 // Localization keys exist
@@ -469,7 +491,7 @@ assert.ok(lang["NDI.Placement.Edit"]);
 // Schema default includes lifecycle null
 const fresh = createState();
 assert.equal(fresh.lifecycle, null);
-assert.equal(fresh.schema, 5);
+assert.equal(fresh.schema, 6);
 
 // attachLifecycle helper
 const attached = attachLifecycle(fresh, createLifecycle({ phase: PHASES.ENEMY, round: 1, roster: [] }));

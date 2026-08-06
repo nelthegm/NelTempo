@@ -13,8 +13,8 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.3.4  
-**Module ID:** `nel-dynamic-initiative`  
+**Current version:** 0.3.5
+**Module ID:** `nel-dynamic-initiative`
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
 
 ## Installation
@@ -27,14 +27,13 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.4**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. Separate portrait and phase-bar scaling, compact/full/auto layouts, GM right-click placement editing, and the optional End Turn keybinding are included. The internal module ID remains `nel-dynamic-initiative`.
+This channel currently serves the **0.3.5** implementation build (RC download URL until stable promotion). Phase turn lifecycle timing: start-of-turn at phase activation; individual End Turn for PF2e end-of-turn. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.4/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip
 ```
-
 ### Manual ZIP install
 
 1. Extract the ZIP (`dist/dynamic-initiative.zip` or the release archive).
@@ -78,8 +77,8 @@ game.dynamicInitiative.start();
 - During Vanguard or Rearguard, click your portrait to claim the next turn (optional highlight) and to control that combatant’s canvas token.
 - Client setting **Pan Camera When Activating Portrait** (default on) centers your camera on the token after activation.
 - Complete your actions in any order, then click **End Turn** on your portrait.
-- **End Turn** only marks you finished for the phase; PF2e end-of-turn effects (including persistent damage) resolve when the whole phase ends.
-- Before the phase ends, you can **Reopen Turn** if you need to act again.
+- **End Turn** runs your PF2e end-of-turn effects (including persistent damage) once for that combatant.
+- **Reopen Turn** is only available before native end processing completes; after End Turn, native effects are not reversed through NelTempo.
 - A Vanguard character can use **Delay to Rearguard**.
 
 ## GM initiative / phase editor (0.3.0)
@@ -96,14 +95,16 @@ Players cannot open the editor. Original initiative chat rolls are never edited.
 
 Clicking the portrait image region controls that combatant’s **exact** token on the current scene (local only). It works even when another token is already controlled, and does not require the combatant to be eligible to act. Off-scene tokens do not switch scenes. See `docs/SLICE_0_3_1_PORTRAIT_ACTIVATION.md`.
 
-## Phase lifecycle (0.2.0+)
+## Phase lifecycle (0.3.5)
 
 When the GM advances into Vanguard, Enemy, or Rearguard:
 
 1. The module snapshots the phase roster and runs native PF2e **start-of-turn** once per combatant.
-2. Players act freely; each uses **End Turn** when done.
+2. Players act freely; each uses **End Turn** when done — that runs native PF2e **end-of-turn** once for that combatant.
 3. When everyone is finished, the dock shows **Phase Complete**.
-4. The GM advances (or uses automatic advance). The module runs native PF2e **end-of-turn** once per combatant, then opens the next phase.
+4. The GM advances (or uses automatic advance). Incomplete phases show a guard dialog: Return, Process Remaining, or Advance Without Processing.
+
+See `docs/SLICE_0_3_5_PHASE_TURN_LIFECYCLE.md`.
 
 ## Condition timing (0.2.1)
 
@@ -126,7 +127,11 @@ Condition detection uses structured PF2e slugs only (`grabbed`, `restrained`, `c
 | Top Offset | Client | 8 | Default distance from the top of the window |
 | Maximum Dock Width | Client | 62 | Max width as a percentage of the browser |
 | Automatically Open Initiative Prompts | Client | true | Auto-open skill prompts when the GM prompts |
-| Minimum Opposition for Raise a Shield | World | true | Manage Raise a Shield until end of next Enemy phase |
+| Manage Raise a Shield / Parry | World | true | Expire at that creature’s next start-of-turn |
+| Turn Lifecycle Automation | World | Native | Off / Reminders Only / Native PF2e Processing |
+| Phase Lifecycle Summary | Client | GM Only | Optional phase-start summary chat |
+| Guard Incomplete Phase | World | true | Dialog before advancing unfinished phases |
+| Allow GM Advance Without Processing | World | true | Show emergency skip option |
 | Advance Completed Phases Automatically | World | Off | Off / Prompt GM / Automatic when all turns end |
 | Enforce Condition Timing | World | true | Grabbed/Restrained delay block and Confused priority gate |
 | NelTempo Debug Logging | Client | false | Concise state diagnostics in the browser console |
@@ -155,13 +160,9 @@ When **NelTempo Debug Logging** is enabled, the console receives short events su
 
 Logged fields are limited to shortened combat ids, phase slugs, revision numbers, combatant counts, pruned-entry counts, and reasons. Actor names, token names, full flags, and secrets are never logged.
 
-## Raise a Shield: minimum opposition
+## Raise a Shield / Parry
 
-While NelTempo is active, newly created **Raise a Shield** effects are changed to unlimited duration and tracked by the module. They are removed at the end of the next applicable Enemy phase.
-
-- Raised in Vanguard: expires at the end of the upcoming Enemy phase.
-- Raised in Rearguard or Initiative: expires at the end of the next Enemy phase.
-- Raised during Enemy: expires at the end of the current Enemy phase.
+While NelTempo is active, newly created **Raise a Shield** and **Parry** effects are tracked and kept unlimited until that creature’s **next start-of-turn** (when their phase activates and actions refresh). They are not held until Enemy phase end.
 
 This option can be disabled in Module Settings.
 

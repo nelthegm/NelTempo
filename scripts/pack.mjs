@@ -23,6 +23,7 @@ const INCLUDE = [
   "scripts/controller.js",
   "scripts/initiative.js",
   "scripts/lifecycle.js",
+  "scripts/lifecycle-hooks.js",
   "scripts/main.js",
   "scripts/pf2e-condition-adapter.js",
   "scripts/pf2e-lifecycle-adapter.js",
@@ -47,6 +48,8 @@ const INCLUDE = [
   "docs/SLICE_0_3_0_TEST_PLAN.md",
   "docs/SLICE_0_3_1_PORTRAIT_ACTIVATION.md",
   "docs/SLICE_0_3_1_TEST_PLAN.md",
+  "docs/SLICE_0_3_5_PHASE_TURN_LIFECYCLE.md",
+  "docs/SLICE_0_3_5_TEST_PLAN.md",
 ];
 
 function ensureIncludes() {

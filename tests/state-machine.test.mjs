@@ -29,7 +29,7 @@ assert.equal(nextPhase(PHASES.REARGUARD), PHASES.INITIATIVE);
 
 let state = createState({ round: 1, enemyDC: 30 });
 assert.equal(state.revision, 0);
-assert.equal(state.schema, 5);
+assert.equal(state.schema, 6);
 
 state = submitResult(state, "pc1", { total: 31, skill: "perception" });
 state = submitResult(state, "pc2", { total: 29, skill: "stealth" });

@@ -62,8 +62,57 @@ function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, SETTINGS.MANAGE_RAISED_SHIELD, {
-    name: "Minimum Opposition for Raise a Shield",
-    hint: "Keep Raise a Shield active until the end of the next Enemy phase, then remove it.",
+    name: "NDI.Setting.ManageRaisedShield.Name",
+    hint: "NDI.Setting.ManageRaisedShield.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    restricted: true,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.TURN_LIFECYCLE_AUTOMATION, {
+    name: "NDI.Setting.TurnLifecycleAutomation.Name",
+    hint: "NDI.Setting.TurnLifecycleAutomation.Hint",
+    scope: "world",
+    config: true,
+    type: String,
+    choices: {
+      off: "NDI.Setting.TurnLifecycleAutomation.Off",
+      reminders: "NDI.Setting.TurnLifecycleAutomation.Reminders",
+      native: "NDI.Setting.TurnLifecycleAutomation.Native",
+    },
+    default: "native",
+    restricted: true,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.PHASE_LIFECYCLE_SUMMARY, {
+    name: "NDI.Setting.PhaseLifecycleSummary.Name",
+    hint: "NDI.Setting.PhaseLifecycleSummary.Hint",
+    scope: "client",
+    config: true,
+    type: String,
+    choices: {
+      off: "NDI.Setting.PhaseLifecycleSummary.Off",
+      gm: "NDI.Setting.PhaseLifecycleSummary.GM",
+      everyone: "NDI.Setting.PhaseLifecycleSummary.Everyone",
+    },
+    default: "gm",
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.GUARD_INCOMPLETE_PHASE, {
+    name: "NDI.Setting.GuardIncompletePhase.Name",
+    hint: "NDI.Setting.GuardIncompletePhase.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    restricted: true,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.ALLOW_ADVANCE_WITHOUT_PROCESSING, {
+    name: "NDI.Setting.AllowAdvanceWithoutProcessing.Name",
+    hint: "NDI.Setting.AllowAdvanceWithoutProcessing.Hint",
     scope: "world",
     config: true,
     type: Boolean,

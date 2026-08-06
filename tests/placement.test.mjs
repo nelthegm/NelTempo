@@ -43,7 +43,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // --- Baseline identity / version / tag ---
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.4");
+assert.equal(moduleJson.version, "0.3.5");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");
@@ -59,7 +59,7 @@ assert.equal(REQUESTS.PLACEMENT_QUEUE, "placement-queue");
 assert.equal(REQUESTS.PLACEMENT_CANCEL_QUEUE, "placement-cancel-queue");
 
 const fresh = createState();
-assert.equal(fresh.schema, 5);
+assert.equal(fresh.schema, 6);
 assert.deepEqual(fresh.placements, {});
 assert.deepEqual(fresh.placementCorrections, {});
 assert.deepEqual(fresh.placementAudit, []);

@@ -319,20 +319,104 @@ export function isTurnFinished(lifecycle, combatantId) {
   return Boolean(turn?.ended || turn?.skipped);
 }
 
+function startBoundaryReady(turn) {
+  const status = turn?.startStatus ?? BOUNDARY_STATUS.PENDING;
+  return status === BOUNDARY_STATUS.COMPLETED || status === BOUNDARY_STATUS.SKIPPED;
+}
+
+function endBoundarySettled(turn) {
+  const status = turn?.endStatus ?? BOUNDARY_STATUS.PENDING;
+  return status === BOUNDARY_STATUS.COMPLETED || status === BOUNDARY_STATUS.SKIPPED;
+}
+
+/**
+ * End Turn is allowed only when the phase is open, start finished, and end not yet claimed.
+ */
 export function canEndTurn(lifecycle, combatantId) {
   if (!lifecycle || lifecycle.status !== LIFECYCLE_STATUS.OPEN) return false;
   const id = String(combatantId);
   if (!lifecycle.roster?.includes(id)) return false;
-  return !isTurnFinished(lifecycle, id);
+  if (isTurnFinished(lifecycle, id)) return false;
+  const turn = lifecycle.turns?.[id];
+  if (!startBoundaryReady(turn)) return false;
+  if (endBoundarySettled(turn)) return false;
+  if (turn?.endStatus === BOUNDARY_STATUS.PROCESSING) return false;
+  return true;
 }
 
+/**
+ * Reopen is only for mark-only / pre-native-end turns. Native end completion is irreversible.
+ */
 export function canReopenTurn(lifecycle, combatantId) {
   if (!lifecycle || lifecycle.status !== LIFECYCLE_STATUS.OPEN) return false;
   if ([LIFECYCLE_STATUS.ENDING, LIFECYCLE_STATUS.ENDED].includes(lifecycle.status)) return false;
   const id = String(combatantId);
   if (!lifecycle.roster?.includes(id)) return false;
   const turn = lifecycle.turns?.[id];
-  return Boolean(turn?.ended && !turn?.skipped);
+  if (!turn?.ended || turn?.skipped) return false;
+  // After 0.3.5, End Turn runs native end; completed/skipped ends cannot be reopened.
+  if (endBoundarySettled(turn)) return false;
+  return true;
+}
+
+/**
+ * Compact UI status for portrait lifecycle pips (no internal IDs).
+ * @returns {"start-pending"|"starting"|"ready"|"ended"|"review"|"skipped"|null}
+ */
+export function combatantLifecycleUiStatus(lifecycle, combatantId) {
+  if (!lifecycle?.turns) return null;
+  const id = String(combatantId);
+  if (!lifecycle.roster?.includes(id)) return null;
+  const turn = lifecycle.turns[id];
+  if (!turn) return null;
+  if (turn.skipped || turn.endStatus === BOUNDARY_STATUS.SKIPPED) return "skipped";
+  if (
+    turn.startStatus === BOUNDARY_STATUS.FAILED ||
+    turn.startStatus === BOUNDARY_STATUS.INTERRUPTED ||
+    turn.endStatus === BOUNDARY_STATUS.FAILED ||
+    turn.endStatus === BOUNDARY_STATUS.INTERRUPTED
+  ) {
+    return "review";
+  }
+  if (turn.ended && endBoundarySettled(turn)) return "ended";
+  if (turn.startStatus === BOUNDARY_STATUS.PROCESSING || turn.endStatus === BOUNDARY_STATUS.PROCESSING) {
+    return "starting";
+  }
+  if (!startBoundaryReady(turn)) return "start-pending";
+  if (lifecycle.status === LIFECYCLE_STATUS.OPEN || lifecycle.status === LIFECYCLE_STATUS.COMPLETE) {
+    return "ready";
+  }
+  return null;
+}
+
+/**
+ * Whether the phase may advance without GM process/skip of remaining ends.
+ */
+export function phaseAdvanceReady(lifecycle, { combatantIds = null } = {}) {
+  if (!lifecycle) return true;
+  const progress = lifecycleProgress(lifecycle, { combatantIds });
+  if (!progress.complete) return false;
+  return endCandidates(lifecycle).length === 0;
+}
+
+/**
+ * Mark pending end boundaries skipped without native processing (Advance Without Processing).
+ */
+export function skipPendingEnds(state, { reason = "advance-without-processing" } = {}) {
+  const next = cloneState(state);
+  const lifecycle = next.lifecycle;
+  if (!lifecycle) return { state: next, changed: false, skipped: [] };
+  const skipped = [];
+  for (const id of endCandidates(lifecycle)) {
+    const turn = lifecycle.turns?.[id] ?? emptyTurnRecord();
+    lifecycle.turns[id] = turn;
+    if (turn.endStatus === BOUNDARY_STATUS.COMPLETED) continue;
+    turn.endStatus = BOUNDARY_STATUS.SKIPPED;
+    turn.endReason = reason;
+    lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
+    skipped.push(id);
+  }
+  return { state: next, changed: skipped.length > 0, skipped };
 }
 
 /**
@@ -393,9 +477,10 @@ export function reopenTurn(state, combatantId, { at = Date.now() } = {}) {
 }
 
 /**
- * Mark remaining unfinished roster combatants as skipped (GM End Remaining / Force Advance).
+ * Mark remaining unfinished roster combatants as skipped (Advance Without Processing).
+ * Also marks their end boundary skipped so native end is not claimed later.
  */
-export function skipRemainingTurns(state, { userId = null, at = Date.now() } = {}) {
+export function skipRemainingTurns(state, { userId = null, at = Date.now(), reason = "advance-without-processing" } = {}) {
   const next = cloneState(state);
   const lifecycle = next.lifecycle;
   if (!lifecycle || ![LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(lifecycle.status)) {
@@ -410,6 +495,10 @@ export function skipRemainingTurns(state, { userId = null, at = Date.now() } = {
     turn.ended = true;
     turn.endedBy = userId == null ? null : String(userId);
     turn.endedAt = Number(at) || Date.now();
+    if (turn.endStatus !== BOUNDARY_STATUS.COMPLETED) {
+      turn.endStatus = BOUNDARY_STATUS.SKIPPED;
+      turn.endReason = reason;
+    }
     next.acted ??= {};
     next.acted[id] = true;
     skipped.push(id);

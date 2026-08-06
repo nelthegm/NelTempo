@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.5
+
+- Phase activation remains the start-of-turn boundary for every eligible combatant in Vanguard, Enemy, or Rearguard.
+- **End Turn** now runs that combatant’s native PF2e end-of-turn once (persistent damage, recovery checks, end-duration effects, etc.).
+- Phase advance no longer silently processes remaining end-of-turn effects; GMs get Return / Process Remaining / Advance Without Processing.
+- Raise a Shield and Parry managed by NelTempo expire at that creature’s start-of-turn (phase activation), not at Enemy phase end.
+- Added Turn Lifecycle Automation, Phase Lifecycle Summary, Guard Incomplete Phase, and Allow GM Advance Without Processing settings.
+- Portrait lifecycle status pips (pending / ready / ended / review / skipped).
+- Public `neltempo.*` lifecycle hooks (sanitized presentation notifications).
+- Safe mid-combat migration from 0.3.4 without retroactive effect processing.
+- Schema 6. Implementation build download points at `v0.3.5-rc1` until stable promotion.
+
 ## 0.3.4
 
 - Separated Portrait Scale and Phase Bar Scale so shrinking portraits no longer shrinks phase-bar and portrait control hit targets.

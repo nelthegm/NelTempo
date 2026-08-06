@@ -1,24 +1,26 @@
 /**
  * Version-sensitive adapter for Pathfinder 2e combatant turn lifecycle.
  *
- * Inspected sources (Foundry V14 + PF2e 8.3.0):
+ * Inspected sources (Foundry V14 + PF2e 8.4.0):
  * - Foundry Combat._manageTurnEvents / _onStartTurn / _onEndTurn
  *   (resources/app/client/data/documents/combat.js)
  * - PF2e EncounterPF2e._onStartTurn / _onEndTurn
- *   (github.com/foundryvtt/pf2e @ pf2e-8.3.0 src/module/encounter/document.ts)
+ *   (github.com/foundryvtt/pf2e @ pf2e-8.4.0 src/module/encounter/document.ts)
  * - PF2e CombatantPF2e.onStartTurn / onEndTurn
- *   (github.com/foundryvtt/pf2e @ pf2e-8.3.0 src/module/encounter/combatant.ts)
+ *   (github.com/foundryvtt/pf2e @ pf2e-8.4.0 src/module/encounter/combatant.ts)
  *
- * Native pathway (PF2e 8.3.0):
+ * Native pathway (PF2e 8.4.0):
  *   Encounter turn change → EncounterPF2e._onStartTurn(combatant, context)
  *     → combatant.onStartTurn()  [rules, recharge round, effects, pf2e.startTurn hook]
  *   Encounter turn change → EncounterPF2e._onEndTurn(combatant, context)
  *     → combatant.onEndTurn({ round })  [conditions incl. persistent damage, effects, pf2e.endTurn]
  *
- * This adapter invokes the combatant methods directly so Dynamic Initiative can
+ * This adapter invokes the combatant methods directly so NelTempo can
  * process a phase roster without flipping combat.turn between combatants.
+ * Capability detection prefers onStartTurn/onEndTurn; falls back to startTurn/endTurn.
  *
- * Do not put Dynamic Initiative state mutation here.
+ * Do not put NelTempo state mutation here.
+ * Do not manually calculate Fast Healing, regeneration, persistent damage, or recovery checks.
  */
 
 const SUPPORTED_SYSTEM = "pf2e";

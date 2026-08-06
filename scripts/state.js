@@ -33,7 +33,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -70,6 +70,11 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     placementAudit: [],
     /** Optional public encounter countdown (schema 5). */
     countdown: null,
+    /**
+     * One-shot GM notice after upgrading an active combat to 0.3.5 turn timing.
+     * When true, show migration dialog; cleared by ACK_LIFECYCLE_MIGRATION.
+     */
+    lifecycleMigrationNotice: false,
     history: [],
   };
 }
@@ -147,9 +152,12 @@ function sanitizeShieldEntry(entry) {
     actorUuid: entry.actorUuid == null ? null : String(entry.actorUuid),
     combatantId: entry.combatantId == null ? null : String(entry.combatantId),
     expireEnemySerial: Math.max(0, Number(entry.expireEnemySerial || 0) || 0),
+    expireOnCombatantStart: entry.expireOnCombatantStart !== false,
+    defenseKind: entry.defenseKind == null ? null : String(entry.defenseKind).slice(0, 40),
     createdPhase: entry.createdPhase == null ? null : String(entry.createdPhase),
     createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
     discoveredAtEnemyEnd: entry.discoveredAtEnemyEnd ? true : undefined,
+    discoveredAtStart: entry.discoveredAtStart ? true : undefined,
   });
 }
 
@@ -209,8 +217,11 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     placementCorrections: {},
     placementAudit: [],
     countdown: null,
+    lifecycleMigrationNotice: false,
     history: [],
   };
+
+  const priorSchema = Number(source.schema ?? 0) || 0;
 
   for (const [combatantId, result] of Object.entries(source.results ?? {})) {
     if (idSet && !idSet.has(String(combatantId))) continue;
@@ -263,10 +274,18 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     if (lifecycle && source._interruptLifecycleProcessing) {
       lifecycle = interruptUncertainProcessing(lifecycle);
     }
+    // Mid-combat upgrade from pre-0.3.5: do not retroactively process effects.
+    // Mark uncertain start/end processing as interrupted (Review); leave completed intact.
+    if (lifecycle && priorSchema > 0 && priorSchema < 6 && source.enabled) {
+      lifecycle = interruptUncertainProcessing(lifecycle);
+      next.lifecycleMigrationNotice = true;
+    }
     next.lifecycle = lifecycle;
   } else {
     next.lifecycle = null;
   }
+
+  if (source.lifecycleMigrationNotice) next.lifecycleMigrationNotice = true;
 
   if (includeHistory && Array.isArray(source.history)) {
     next.history = source.history

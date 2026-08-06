@@ -164,6 +164,46 @@ body.ndi-suppress-native-tracker .combat-tracker {
   box-shadow: 0 0 6px rgba(52, 200, 193, 0.55);
 }
 
+.ndi-lifecycle-pip {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 0.62rem;
+  color: #f4f0e8;
+  background: rgba(18, 16, 22, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.ndi-lifecycle-pip.is-ready {
+  color: #9dffd8;
+  border-color: rgba(52, 200, 193, 0.7);
+}
+
+.ndi-lifecycle-pip.is-start-pending,
+.ndi-lifecycle-pip.is-starting {
+  color: #f0d48a;
+}
+
+.ndi-lifecycle-pip.is-review {
+  color: #ffb347;
+  background: rgba(60, 28, 12, 0.9);
+}
+
+.ndi-lifecycle-pip.is-ended-pip {
+  color: #9dffd8;
+}
+
+.ndi-lifecycle-pip.is-skipped {
+  color: #c8c2b8;
+  opacity: 0.85;
+}
+
 .ndi-turn-controls {
   display: flex;
   justify-content: center;

@@ -5,9 +5,12 @@ import { rollDynamicInitiative } from "./initiative.js";
 import {
   canEndTurn,
   canReopenTurn,
+  combatantLifecycleUiStatus,
+  endCandidates,
   isLifecyclePhase,
   lifecycleProgress,
   LIFECYCLE_STATUS,
+  phaseAdvanceReady,
 } from "./lifecycle.js";
 import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
 import { activateCombatantPortrait } from "./portrait-activation.js";
@@ -141,6 +144,12 @@ function canUserReopen(combatant, state) {
 
 function endTurnDisabledReason(combatant, state) {
   if (!state.lifecycle) return null;
+  const turn = state.lifecycle.turns?.[combatant.id];
+  const start = turn?.startStatus;
+  if (start && start !== "completed" && start !== "skipped") {
+    if (start === "failed" || start === "interrupted") return t("NDI.Lifecycle.Status.Review");
+    return t("NDI.Lifecycle.Status.StartPending");
+  }
   const eligibility = evaluateEndTurnEligibility(state.lifecycle, combatant.id, {
     enforce: isTimingEnforced(),
   });
@@ -312,6 +321,7 @@ function portraitHTML(combatant, state) {
   const endedBadge = finished
     ? `<span class="ndi-ended-badge" aria-hidden="true"><i class="fa-solid fa-check"></i></span>`
     : "";
+  const lifecyclePip = lifecycleStatusPip(combatant, state);
 
   const badgeKey = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
   const showOverlay = isPortraitOverlayBadge(badgeKey);
@@ -368,6 +378,7 @@ function portraitHTML(combatant, state) {
         <img src="${escapeHTML(portraitFor(combatant))}" alt="${escapeHTML(combatantName(combatant))}" draggable="false">
         ${resultBadge}
         ${endedBadge}
+        ${lifecyclePip}
         ${timingBadge}
         ${isLocallyControlledCombatant(combatant) ? `<span class="ndi-token-selected" title="${escapeHTML(t("NDI.Portrait.TokenSelected"))}" aria-label="${escapeHTML(t("NDI.Portrait.TokenSelected"))}"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></span>` : ""}
       </span>
@@ -869,16 +880,89 @@ async function confirmEndCombat() {
   return window.confirm("End this combat encounter?");
 }
 
-async function confirmDialog(title, content) {
-  const DialogV2 = foundry?.applications?.api?.DialogV2;
-  if (DialogV2?.confirm) {
-    return DialogV2.confirm({
-      window: { title },
-      content: `<p>${content}</p>`,
-      yes: { default: true },
-    });
+function lifecycleStatusPip(combatant, state) {
+  const status = combatantLifecycleUiStatus(state.lifecycle, combatant.id);
+  if (!status) return "";
+  const meta = {
+    "start-pending": { icon: "fa-clock", tip: "NDI.Lifecycle.Status.StartPending", cls: "is-start-pending" },
+    starting: { icon: "fa-spinner", tip: "NDI.Lifecycle.Status.Starting", cls: "is-starting" },
+    ready: { icon: "fa-play", tip: "NDI.Lifecycle.Status.Ready", cls: "is-ready" },
+    ended: { icon: "fa-check", tip: "NDI.Lifecycle.Status.Ended", cls: "is-ended-pip" },
+    review: { icon: "fa-triangle-exclamation", tip: "NDI.Lifecycle.Status.Review", cls: "is-review" },
+    skipped: { icon: "fa-forward", tip: "NDI.Lifecycle.Status.Skipped", cls: "is-skipped" },
+  }[status];
+  if (!meta) return "";
+  const tip = t(meta.tip);
+  return `<span class="ndi-lifecycle-pip ${meta.cls}" title="${escapeHTML(tip)}" aria-label="${escapeHTML(tip)}"><i class="fa-solid ${meta.icon}" aria-hidden="true"></i></span>`;
+}
+
+function incompletePhaseNames(combat, state) {
+  if (!state.lifecycle) return [];
+  const names = [];
+  const remaining = lifecycleProgress(state.lifecycle, {
+    combatantIds: [...combat.combatants].map((c) => c.id),
+  }).remaining;
+  const ends = endCandidates(state.lifecycle);
+  const ids = [...new Set([...remaining, ...ends])];
+  for (const id of ids) {
+    const c = getCombatant(combat, id);
+    if (c) names.push(combatantName(c));
   }
-  return window.confirm(content);
+  return names;
+}
+
+/**
+ * GM phase-advance guard: Return / Process Remaining / Advance Without Processing.
+ * @returns {"return"|"process"|"skip"|null}
+ */
+async function incompletePhaseGuardDialog(combat, state) {
+  const names = incompletePhaseNames(combat, state);
+  const list = names.map((n) => `<li>${escapeHTML(n)}</li>`).join("");
+  const content = `<p>${escapeHTML(t("NDI.Lifecycle.CannotAdvancePhase"))}</p>
+    <p>${escapeHTML(t("NDI.Lifecycle.IncompleteTurnsList"))}</p>
+    <ul>${list || `<li>${escapeHTML(t("NDI.Lifecycle.IncompleteUnknown"))}</li>`}</ul>`;
+
+  let allowSkip = true;
+  try {
+    allowSkip = game.settings.get(MODULE_ID, SETTINGS.ALLOW_ADVANCE_WITHOUT_PROCESSING) !== false;
+  } catch (_error) {
+    allowSkip = true;
+  }
+
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (DialogV2?.wait) {
+    const buttons = [
+      {
+        action: "return",
+        label: t("NDI.Lifecycle.ReturnToPhase"),
+        default: true,
+      },
+      {
+        action: "process",
+        label: t("NDI.Lifecycle.ProcessAndEndRemaining"),
+      },
+    ];
+    if (allowSkip) {
+      buttons.push({
+        action: "skip",
+        label: t("NDI.Lifecycle.AdvanceWithoutProcessing"),
+      });
+    }
+    const result = await DialogV2.wait({
+      window: { title: t("NDI.Lifecycle.CannotAdvanceTitle") },
+      content,
+      buttons,
+      rejectClose: false,
+    });
+    if (result === "process" || result === "skip" || result === "return") return result;
+    return "return";
+  }
+
+  // Fallback: confirm = process, cancel = return (no silent skip).
+  const ok = window.confirm(
+    `${t("NDI.Lifecycle.CannotAdvancePhase")}\n\n${names.join(", ")}\n\nOK = Process and End Remaining`,
+  );
+  return ok ? "process" : "return";
 }
 
 function placementReasonText(reason) {
@@ -1118,6 +1202,32 @@ function bindDockEvents(root, combat, state) {
       case "apply-phase":
       case "advance-phase": {
         const phase = nextPhase(state.phase);
+        let guard = true;
+        try {
+          guard = game.settings.get(MODULE_ID, SETTINGS.GUARD_INCOMPLETE_PHASE) !== false;
+        } catch (_error) {
+          guard = true;
+        }
+        if (
+          game.user.isGM &&
+          guard &&
+          isLifecyclePhase(state.phase) &&
+          state.lifecycle &&
+          !phaseAdvanceReady(state.lifecycle, {
+            combatantIds: [...combat.combatants].map((c) => c.id),
+          })
+        ) {
+          const choice = await incompletePhaseGuardDialog(combat, state);
+          if (choice === "return" || choice == null) break;
+          if (choice === "process") {
+            await requestAction(REQUESTS.PROCESS_END_REMAINING);
+            break;
+          }
+          if (choice === "skip") {
+            await requestAction(REQUESTS.FORCE_ADVANCE);
+            break;
+          }
+        }
         await requestAction(REQUESTS.SET_PHASE, { phase });
         break;
       }

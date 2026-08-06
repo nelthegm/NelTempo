@@ -29,6 +29,14 @@ export const SETTINGS = Object.freeze({
   PHASE_BAR_LAYOUT: "phaseBarLayout",
   /** One-shot client migration from INTERFACE_SCALE → portrait/phase scales. */
   INTERFACE_SCALE_MIGRATED: "interfaceScaleMigratedV034",
+  /** off | reminders | native — turn lifecycle automation mode */
+  TURN_LIFECYCLE_AUTOMATION: "turnLifecycleAutomation",
+  /** off | gm | everyone — phase start summary chat */
+  PHASE_LIFECYCLE_SUMMARY: "phaseLifecycleSummary",
+  /** When true, advancing an incomplete phase shows the GM guard dialog. */
+  GUARD_INCOMPLETE_PHASE: "guardIncompletePhase",
+  /** When true, the emergency Advance Without Processing option is available. */
+  ALLOW_ADVANCE_WITHOUT_PROCESSING: "allowAdvanceWithoutProcessing",
 });
 
 export const PHASE_BAR_LAYOUTS = Object.freeze({
@@ -46,6 +54,18 @@ export const AUTO_ADVANCE = Object.freeze({
   AUTOMATIC: "automatic",
 });
 
+export const TURN_LIFECYCLE_AUTOMATION = Object.freeze({
+  OFF: "off",
+  REMINDERS: "reminders",
+  NATIVE: "native",
+});
+
+export const PHASE_LIFECYCLE_SUMMARY = Object.freeze({
+  OFF: "off",
+  GM: "gm",
+  EVERYONE: "everyone",
+});
+
 export const REQUESTS = Object.freeze({
   START: "start",
   PROMPT: "prompt",
@@ -58,10 +78,15 @@ export const REQUESTS = Object.freeze({
   REOPEN_TURN: "reopen-turn",
   END_REMAINING: "end-remaining",
   FORCE_ADVANCE: "force-advance",
+  /** Process native end for incomplete combatants, then advance when ready. */
+  PROCESS_END_REMAINING: "process-end-remaining",
   RETRY_FAILED_START: "retry-failed-start",
   SKIP_FAILED_START: "skip-failed-start",
   RETRY_FAILED_END: "retry-failed-end",
   SKIP_FAILED_END: "skip-failed-end",
+  START_TURN_NOW: "start-turn-now",
+  MARK_LIFECYCLE_REVIEW: "mark-lifecycle-review",
+  ACK_LIFECYCLE_MIGRATION: "ack-lifecycle-migration",
   DELAY: "delay",
   MOVE_REARGUARD: "move-rearguard",
   MARK_ACTED: "mark-acted",
