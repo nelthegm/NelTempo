@@ -7,11 +7,14 @@ import {
   canReopenTurn,
   combatantLifecycleUiStatus,
   endCandidates,
+  getCombatantLifecycleStatus,
   isLifecyclePhase,
+  isTurnEndedComplete,
   lifecycleProgress,
   LIFECYCLE_STATUS,
   phaseAdvanceReady,
 } from "./lifecycle.js";
+import { shouldGuardIncompletePhase } from "./controller.js";
 import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
 import { activateCombatantPortrait } from "./portrait-activation.js";
 import {
@@ -72,9 +75,16 @@ function phaseLabel(phase) {
 }
 
 function isTurnFinished(state, combatantId) {
-  const turn = state.lifecycle?.turns?.[combatantId];
-  if (turn) return Boolean(turn.ended || turn.skipped);
+  if (state.lifecycle) {
+    const status = getCombatantLifecycleStatus(state.lifecycle, combatantId);
+    return status.resolvedForAdvancement || status.legacyEndedPending || status.endedFlag;
+  }
   return Boolean(state.acted?.[combatantId]);
+}
+
+function isPortraitTurnEnded(state, combatantId) {
+  if (!state.lifecycle) return Boolean(state.acted?.[combatantId]);
+  return isTurnEndedComplete(state.lifecycle, combatantId);
 }
 
 function lifecycleIsOpen(state) {
@@ -224,7 +234,14 @@ function statusFor(combatant, state) {
   }
   if (lifecycleBusy(state)) return t("NDI.Lifecycle.StartingPhase").replace("…", "");
   if (state.lifecycle?.status === LIFECYCLE_STATUS.ENDING) return t("NDI.Lifecycle.EndingPhase");
-  if (isTurnFinished(state, combatant.id)) return t("NDI.Control.Ended");
+  if (state.lifecycle) {
+    const life = getCombatantLifecycleStatus(state.lifecycle, combatant.id);
+    if (life.turnSkipped) return t("NDI.Lifecycle.Status.Skipped");
+    if (life.needsReview) return t("NDI.Lifecycle.Status.Review");
+    if (life.turnComplete) return t("NDI.Control.Ended");
+  } else if (isTurnFinished(state, combatant.id)) {
+    return t("NDI.Control.Ended");
+  }
   const badge = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
   // Priority / override status only — Delay Blocked is conveyed by the Delay control.
   if (isPortraitOverlayBadge(badge)) {
@@ -244,7 +261,9 @@ function portraitClasses(combatant, state) {
   const resultPhase = resultForCurrentRound(state, combatant.id)?.phase;
   if (resultPhase) classes.push(`is-${resultPhase}`);
   if (isUnconscious(combatant)) classes.push("is-unconscious");
-  if (isTurnFinished(state, combatant.id)) classes.push("is-ended");
+  if (isPortraitTurnEnded(state, combatant.id) || getCombatantLifecycleStatus(state.lifecycle, combatant.id)?.turnSkipped) {
+    classes.push("is-ended");
+  }
   const badge = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
   if (badge === "must-act-first") classes.push("is-priority");
   if (badge === "waiting-confused") classes.push("is-waiting-priority");
@@ -275,7 +294,11 @@ function isLocallyControlledCombatant(combatant) {
 function portraitHTML(combatant, state) {
   const result = resultForCurrentRound(state, combatant.id);
   const ownerCanRoll = game.user.isGM || userCanOwnCombatant(game.user, combatant);
-  const finished = isTurnFinished(state, combatant.id);
+  const life = state.lifecycle
+    ? getCombatantLifecycleStatus(state.lifecycle, combatant.id)
+    : null;
+  const finished = Boolean(life?.resolvedForAdvancement || life?.legacyEndedPending);
+  const showEndedBadge = Boolean(life?.turnComplete || life?.turnSkipped);
   const rollButton =
     state.phase === PHASES.INITIATIVE &&
     ownerCanRoll &&
@@ -295,8 +318,10 @@ function portraitHTML(combatant, state) {
          </button>`;
   }
 
+  // GM shortcut: unresolved → End Turn (native); resolved → Restore when reopenable.
+  // Never use a silent mark-ended without processing.
   const gmCorrect = game.user.isGM && state.phase !== PHASES.INITIATIVE && lifecycleIsOpen(state)
-    ? `<button type="button" class="ndi-icon-button ndi-gm-correct" data-action="toggle-acted" data-combatant-id="${combatant.id}" title="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.MarkComplete"))}" aria-label="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.MarkComplete"))}">
+    ? `<button type="button" class="ndi-icon-button ndi-gm-correct" data-action="${finished ? "reopen-turn" : "end-turn"}" data-combatant-id="${combatant.id}" title="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.EndTurn"))}" aria-label="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.EndTurn"))}" ${finished && !canUserReopen(combatant, state) ? "disabled aria-disabled=\"true\"" : ""}>
          <i class="fa-solid ${finished ? "fa-rotate-left" : "fa-check"}"></i>
        </button>`
     : "";
@@ -318,7 +343,7 @@ function portraitHTML(combatant, state) {
   }  const resultBadge = result && Number.isFinite(Number(result.total))
     ? `<span class="ndi-result-badge">${result.total}</span>`
     : "";
-  const endedBadge = finished
+  const endedBadge = showEndedBadge
     ? `<span class="ndi-ended-badge" aria-hidden="true"><i class="fa-solid fa-check"></i></span>`
     : "";
   const lifecyclePip = lifecycleStatusPip(combatant, state);
@@ -348,7 +373,7 @@ function portraitHTML(combatant, state) {
       turnControls = `<button type="button" class="ndi-reopen-turn-btn" data-action="reopen-turn" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Control.ReopenTurn"))}" aria-label="${escapeHTML(t("NDI.Control.ReopenTurn"))}">
         <i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Control.ReopenTurn"))}
       </button>`;
-    } else if (finished) {
+    } else if (life?.turnComplete || life?.turnSkipped) {
       const reopenEval = evaluateReopenEligibility(state.lifecycle, combatant.id, {
         isGM: game.user.isGM,
         enforce: isTimingEnforced(),
@@ -357,9 +382,15 @@ function portraitHTML(combatant, state) {
         turnControls = `<button type="button" class="ndi-reopen-turn-btn" data-action="timing-reopen-confused" data-combatant-id="${combatant.id}" title="${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}" aria-label="${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}">
           <i class="fa-solid fa-rotate-left"></i> ${escapeHTML(t("NDI.Timing.ReopenConfusedTurn"))}
         </button>`;
+      } else if (life.turnSkipped) {
+        turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Lifecycle.Status.Skipped"))}</span>`;
+      } else if (life.needsReview) {
+        turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Lifecycle.Status.Review"))}</span>`;
       } else {
         turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Control.Ended"))}</span>`;
       }
+    } else if (life?.needsReview) {
+      turnControls = `<span class="ndi-ended-label">${escapeHTML(t("NDI.Lifecycle.Status.Review"))}</span>`;
     }
   }
 
@@ -470,14 +501,19 @@ function phaseProgressHTML(combat, state) {
   const progress = lifecycleProgress(state.lifecycle, {
     combatantIds: [...combat.combatants].map((c) => c.id),
   });
+  const endedLabel = t("NDI.Lifecycle.EndedProgress", { ended: progress.ended, total: progress.total });
+  const reviewLabel =
+    progress.review > 0
+      ? ` · ${t("NDI.Lifecycle.ReviewProgress", { count: progress.review })}`
+      : "";
   if (progress.complete || status === LIFECYCLE_STATUS.COMPLETE) {
     return `<div class="ndi-phase-progress is-complete" role="status">
       <i class="fa-solid fa-flag-checkered"></i> ${escapeHTML(t("NDI.Lifecycle.PhaseComplete"))}
-      · ${escapeHTML(t("NDI.Lifecycle.EndedProgress", { ended: progress.ended, total: progress.total }))}
+      · ${escapeHTML(endedLabel)}${escapeHTML(reviewLabel)}
     </div>`;
   }
   return `<div class="ndi-phase-progress" role="status">
-    ${escapeHTML(t("NDI.Lifecycle.EndedProgress", { ended: progress.ended, total: progress.total }))}
+    ${escapeHTML(endedLabel)}${escapeHTML(reviewLabel)}
     · ${escapeHTML(t("NDI.Lifecycle.WaitingFor", { count: progress.remaining.length }))}
   </div>`;
 }
@@ -913,6 +949,7 @@ function incompletePhaseNames(combat, state) {
 
 /**
  * GM phase-advance guard: Return / Process Remaining / Advance Without Processing.
+ * Always offers force-advance to the GM. Falls back if DialogV2 cannot render.
  * @returns {"return"|"process"|"skip"|null}
  */
 async function incompletePhaseGuardDialog(combat, state) {
@@ -922,47 +959,41 @@ async function incompletePhaseGuardDialog(combat, state) {
     <p>${escapeHTML(t("NDI.Lifecycle.IncompleteTurnsList"))}</p>
     <ul>${list || `<li>${escapeHTML(t("NDI.Lifecycle.IncompleteUnknown"))}</li>`}</ul>`;
 
-  let allowSkip = true;
-  try {
-    allowSkip = game.settings.get(MODULE_ID, SETTINGS.ALLOW_ADVANCE_WITHOUT_PROCESSING) !== false;
-  } catch (_error) {
-    allowSkip = true;
-  }
-
   const DialogV2 = foundry?.applications?.api?.DialogV2;
-  if (DialogV2?.wait) {
-    const buttons = [
-      {
-        action: "return",
-        label: t("NDI.Lifecycle.ReturnToPhase"),
-        default: true,
-      },
-      {
-        action: "process",
-        label: t("NDI.Lifecycle.ProcessAndEndRemaining"),
-      },
-    ];
-    if (allowSkip) {
-      buttons.push({
-        action: "skip",
-        label: t("NDI.Lifecycle.AdvanceWithoutProcessing"),
+  try {
+    if (DialogV2?.wait) {
+      const result = await DialogV2.wait({
+        window: { title: t("NDI.Lifecycle.CannotAdvanceTitle") },
+        content,
+        buttons: [
+          {
+            action: "return",
+            label: t("NDI.Lifecycle.ReturnToPhase"),
+            default: true,
+          },
+          {
+            action: "process",
+            label: t("NDI.Lifecycle.ProcessAndEndRemaining"),
+          },
+          {
+            action: "skip",
+            label: t("NDI.Lifecycle.AdvanceWithoutProcessing"),
+          },
+        ],
+        rejectClose: false,
       });
+      if (result === "process" || result === "skip" || result === "return") return result;
+      return "return";
     }
-    const result = await DialogV2.wait({
-      window: { title: t("NDI.Lifecycle.CannotAdvanceTitle") },
-      content,
-      buttons,
-      rejectClose: false,
-    });
-    if (result === "process" || result === "skip" || result === "return") return result;
-    return "return";
+  } catch (error) {
+    console.error(`${MODULE_ID} | phase-advance dialog failed`, error);
   }
 
-  // Fallback: confirm = process, cancel = return (no silent skip).
-  const ok = window.confirm(
-    `${t("NDI.Lifecycle.CannotAdvancePhase")}\n\n${names.join(", ")}\n\nOK = Process and End Remaining`,
+  // Safe fallback: Cancel or Advance Without Processing — never trap the GM.
+  const force = window.confirm(
+    `${t("NDI.Lifecycle.CannotAdvancePhase")}\n\n${names.join(", ")}\n\n${t("NDI.Lifecycle.DialogFallbackForce")}`,
   );
-  return ok ? "process" : "return";
+  return force ? "skip" : "return";
 }
 
 function placementReasonText(reason) {
@@ -1202,12 +1233,8 @@ function bindDockEvents(root, combat, state) {
       case "apply-phase":
       case "advance-phase": {
         const phase = nextPhase(state.phase);
-        let guard = true;
-        try {
-          guard = game.settings.get(MODULE_ID, SETTINGS.GUARD_INCOMPLETE_PHASE) !== false;
-        } catch (_error) {
-          guard = true;
-        }
+        // Read the world setting live — do not cache from init/render.
+        const guard = shouldGuardIncompletePhase();
         if (
           game.user.isGM &&
           guard &&
@@ -1228,6 +1255,7 @@ function bindDockEvents(root, combat, state) {
             break;
           }
         }
+        // Guard off or phase ready: SET_PHASE advances (controller skips pending when unguarded).
         await requestAction(REQUESTS.SET_PHASE, { phase });
         break;
       }

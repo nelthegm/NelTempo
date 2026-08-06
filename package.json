@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/state-machine.test.mjs && node tests/persistence.test.mjs && node tests/lifecycle.test.mjs && node tests/turn-lifecycle-035.test.mjs && node tests/timing.test.mjs && node tests/placement.test.mjs && node tests/portrait-activation.test.mjs && node tests/ui-countdown.test.mjs && node tests/authority.test.mjs && node tests/ui-density.test.mjs && node tests/package-validate.test.mjs",
+    "test": "node tests/state-machine.test.mjs && node tests/persistence.test.mjs && node tests/lifecycle.test.mjs && node tests/turn-lifecycle-035.test.mjs && node tests/turn-completion-036.test.mjs && node tests/timing.test.mjs && node tests/placement.test.mjs && node tests/portrait-activation.test.mjs && node tests/ui-countdown.test.mjs && node tests/authority.test.mjs && node tests/ui-density.test.mjs && node tests/package-validate.test.mjs",
     "pack": "node scripts/pack.mjs"
   }
 }

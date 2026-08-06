@@ -50,6 +50,7 @@ const INCLUDE = [
   "docs/SLICE_0_3_1_TEST_PLAN.md",
   "docs/SLICE_0_3_5_PHASE_TURN_LIFECYCLE.md",
   "docs/SLICE_0_3_5_TEST_PLAN.md",
+  "docs/SLICE_0_3_6_TURN_COMPLETION.md",
 ];
 
 function ensureIncludes() {

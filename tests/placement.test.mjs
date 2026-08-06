@@ -43,7 +43,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // --- Baseline identity / version / tag ---
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.5");
+assert.equal(moduleJson.version, "0.3.6");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");

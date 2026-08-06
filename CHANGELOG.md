@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.6
+
+- Unifies portrait, phase-header, and Advance Phase completion on one lifecycle end-boundary selector.
+- Fixes contradictory “Ended 2/2” vs “have not ended their turn” when legacy mark-ended left `endStatus` pending.
+- **Guard Incomplete Phase = Off** advances immediately: pending ends become Skipped (no native `onEndTurn`).
+- **Guard Incomplete Phase = On** opens the actionable dialog (Return / Process Remaining / Advance Without Processing); never warn-only.
+- Portrait GM checkmark routes through End Turn (native once), not a silent mark-ended flag.
+- Dialog-render failure still offers a GM force-advance fallback.
+- Manifest prepared for `v0.3.6-rc1`.
+
 ## 0.3.5
 
 - Phase activation remains the start-of-turn boundary for every eligible combatant in Vanguard, Enemy, or Rearguard.

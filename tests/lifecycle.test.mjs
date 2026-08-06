@@ -241,8 +241,12 @@ completeState.lifecycle = createLifecycle({
   roster: ["e1", "e2"],
 });
 completeState.lifecycle.status = LIFECYCLE_STATUS.OPEN;
+completeState.lifecycle.turns.e1.startStatus = BOUNDARY_STATUS.COMPLETED;
+completeState.lifecycle.turns.e2.startStatus = BOUNDARY_STATUS.COMPLETED;
+completeState = markCombatantEndResult(completeState, "e1", { ok: true });
 completeState = markTurnEnded(completeState, "e1", { userId: "gm" }).state;
 assert.equal(completeState.lifecycle.status, LIFECYCLE_STATUS.OPEN);
+completeState = markCombatantEndResult(completeState, "e2", { ok: true });
 completeState = markTurnEnded(completeState, "e2", { userId: "gm" }).state;
 assert.equal(completeState.lifecycle.status, LIFECYCLE_STATUS.COMPLETE);
 const prog = lifecycleProgress(completeState.lifecycle);
@@ -257,6 +261,7 @@ const withGone = createLifecycle({
 });
 withGone.status = LIFECYCLE_STATUS.OPEN;
 withGone.turns.keep.ended = true;
+withGone.turns.keep.endStatus = BOUNDARY_STATUS.COMPLETED;
 const progLive = lifecycleProgress(withGone, { combatantIds: ["keep"] });
 assert.equal(progLive.complete, true);
 assert.equal(progLive.total, 1);
@@ -275,6 +280,7 @@ forceState.lifecycle = createLifecycle({
   roster: ["a", "b"],
 });
 forceState.lifecycle.status = LIFECYCLE_STATUS.OPEN;
+forceState = markCombatantEndResult(forceState, "a", { ok: true });
 forceState = markTurnEnded(forceState, "a", { userId: "gm" }).state;
 const skipped = skipRemainingTurns(forceState, { userId: "gm" });
 assert.equal(skipped.changed, true);
@@ -282,9 +288,17 @@ assert.deepEqual(skipped.skipped, ["b"]);
 assert.equal(skipped.state.lifecycle.turns.b.skipped, true);
 assert.equal(skipped.state.lifecycle.turns.b.endStatus, BOUNDARY_STATUS.SKIPPED);
 assert.equal(skipped.state.lifecycle.status, LIFECYCLE_STATUS.COMPLETE);
+assert.equal(phaseAdvanceReady(skipped.state.lifecycle), true);
 
-const pendingEnds = skipPendingEnds(forceState, { reason: "test-skip" });
+// Legacy ended-without-endStatus is settled by skipRemainingTurns / skipPendingEnds
+let legacyForce = createState();
+legacyForce.lifecycle = createLifecycle({ phase: PHASES.VANGUARD, round: 1, roster: ["a", "b"] });
+legacyForce.lifecycle.status = LIFECYCLE_STATUS.OPEN;
+legacyForce = markTurnEnded(legacyForce, "a", { userId: "gm" }).state;
+assert.equal(phaseAdvanceReady(legacyForce.lifecycle), false);
+const pendingEnds = skipPendingEnds(legacyForce, { reason: "test-skip" });
 assert.equal(pendingEnds.state.lifecycle.turns.a.endStatus, BOUNDARY_STATUS.SKIPPED);
+assert.equal(pendingEnds.state.lifecycle.turns.b.endStatus, BOUNDARY_STATUS.SKIPPED);
 
 // --- End boundary once ---
 let endBound = createState();
@@ -476,7 +490,7 @@ assert.equal(REQUESTS.END_REMAINING, "end-remaining");
 
 // Module version
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.5");
+assert.equal(moduleJson.version, "0.3.6");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 
 // Localization keys exist

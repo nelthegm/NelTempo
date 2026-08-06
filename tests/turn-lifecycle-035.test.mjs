@@ -41,7 +41,7 @@ import { PHASES, createState, normalizeState } from "../scripts/state.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.5");
+assert.equal(moduleJson.version, "0.3.6");
 assert.equal(moduleJson.id, MODULE_ID);
 
 // Settings keys

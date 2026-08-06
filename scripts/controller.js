@@ -37,6 +37,7 @@ import {
   markCombatantStartProcessing,
   markCombatantStartResult,
   markTurnEnded,
+  markTurnSkipped,
   phaseAdvanceReady,
   reopenTurn,
   skipFailedEnds,
@@ -45,6 +46,7 @@ import {
   skipRemainingTurns,
   startCandidates,
   undoCrossesPhaseEnd,
+  getCombatantLifecycleStatus,
 } from "./lifecycle.js";
 import {
   emitCombatantTurnEnded,
@@ -268,6 +270,18 @@ function lifecycleDiag(event, combat, state, extra = {}) {
 /*  Start / end boundary processing             */
 /* -------------------------------------------- */
 
+/**
+ * Read the world setting live at the advancement boundary.
+ * Exact registered key: guardIncompletePhase (default true).
+ */
+export function shouldGuardIncompletePhase() {
+  try {
+    return game.settings.get(MODULE_ID, SETTINGS.GUARD_INCOMPLETE_PHASE) === true;
+  } catch (_error) {
+    return true;
+  }
+}
+
 function turnLifecycleAutomationMode() {
   try {
     return game.settings.get(MODULE_ID, SETTINGS.TURN_LIFECYCLE_AUTOMATION) ?? TURN_LIFECYCLE_AUTOMATION.NATIVE;
@@ -285,11 +299,7 @@ function phaseLifecycleSummaryMode() {
 }
 
 function guardIncompletePhaseEnabled() {
-  try {
-    return game.settings.get(MODULE_ID, SETTINGS.GUARD_INCOMPLETE_PHASE) !== false;
-  } catch (_error) {
-    return true;
-  }
+  return shouldGuardIncompletePhase();
 }
 
 function allowAdvanceWithoutProcessing() {
@@ -485,6 +495,13 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
   if (after && !after.ended && !after.skipped) {
     const marked = markTurnEnded(next, id, { userId });
     next = marked.changed ? applyEndTurnTiming(marked.state, id) : next;
+  } else {
+    // Legacy ended-without-endStatus (or already flagged): sync phase COMPLETE when all resolved.
+    const progress = lifecycleProgress(next.lifecycle);
+    if (progress.complete && next.lifecycle.status === LIFECYCLE_STATUS.OPEN) {
+      next = structuredClone(next);
+      next.lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
+    }
   }
   await persistState(combat, next, "combatant-end-complete");
   emitCombatantTurnEnded(combat, next, id);
@@ -672,13 +689,30 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
           }
 
           const ready = phaseAdvanceReady(lc, { combatantIds: combatantIdList(combat) });
-          if (!ready && !force && !processRemaining) {
+          const guardEnabled = shouldGuardIncompletePhase();
+
+          // Guard Incomplete Phase = false: never block; skip pending ends; advance immediately.
+          if (!ready && !force && !processRemaining && !guardEnabled) {
+            const skipped = skipRemainingTurns(next, {
+              userId: game.user.id,
+              reason: "guard-disabled-advance",
+            });
+            next = skipped.state;
+            const pending = skipPendingEnds(next, { reason: "guard-disabled-advance" });
+            next = pending.state;
+            lifecycleDiag("phase-advanced-unguarded", combat, next, {
+              skipped: skipped.skipped.length,
+              endsSkipped: pending.skipped.length,
+            });
+          } else if (!ready && !force && !processRemaining && guardEnabled) {
+            // Incomplete with guard on: never warn-and-return as the only path.
+            // UI should open the dialog; if SET_PHASE arrives here, refuse without trapping
+            // (clients must use Process Remaining or Force Advance).
             const progress = lifecycleProgress(lc, { combatantIds: combatantIdList(combat) });
-            const pendingEnds = endCandidates(lc).length;
             notify(
               "warn",
-              localize("NDI.Lifecycle.UnfinishedTurns", {
-                count: Math.max(progress.remaining.length, pendingEnds),
+              localize("NDI.Lifecycle.CannotAdvanceUseDialog", {
+                count: progress.remaining.length,
               }),
             );
             return state;
@@ -706,10 +740,7 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
               return next;
             }
           } else if (force) {
-            if (!allowAdvanceWithoutProcessing()) {
-              notify("warn", localize("NDI.Lifecycle.AdvanceWithoutProcessingDisabled"));
-              return state;
-            }
+            // Explicit GM Advance Without Processing — always available to primary GM.
             const skipped = skipRemainingTurns(next, { userId: game.user.id });
             next = skipped.state;
             const pending = skipPendingEnds(next, { reason: "advance-without-processing" });
@@ -1170,9 +1201,6 @@ async function endRemainingTurns(combat, state, requestUser) {
 
 async function forceAdvance(combat, state, requestUser) {
   if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
-  if (!allowAdvanceWithoutProcessing()) {
-    throw new Error(localize("NDI.Lifecycle.AdvanceWithoutProcessingDisabled"));
-  }
   const target = nextPhaseValue(state.phase);
   await transitionToPhase(combat, state, target, { force: true });
 }
@@ -1428,22 +1456,29 @@ async function delayCombatant(combat, state, payload, requestUser) {
   }
 }
 
-async function markCombatantActed(combat, state, payload) {
+async function markCombatantActed(combat, state, payload, requestUser) {
   const combatant = getCombatant(combat, payload.combatantId);
   if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
 
   if (isLifecyclePhase(state.phase) && state.lifecycle?.roster?.includes(combatant.id)) {
     if (payload.acted === false) {
       const result = reopenTurn(withHistory(state, `Restore turn ${combatant.id}`), combatant.id);
       await persistState(combat, result.state, "mark-acted");
-    } else {
-      const result = markTurnEnded(withHistory(state, `Complete turn ${combatant.id}`), combatant.id, {
-        userId: game.user.id,
-      });
-      await persistState(combat, result.state, "mark-acted");
+    } else if (payload.skipWithoutProcessing) {
+      const result = markTurnSkipped(
+        withHistory(state, `Mark skipped ${combatant.id}`),
+        combatant.id,
+        { userId: requestUser.id, reason: "marked-skipped" },
+      );
+      await persistState(combat, result.state, "mark-skipped");
       if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
         await maybeAutoAdvance(combat, result.state);
       }
+    } else {
+      // Authoritative End Turn pipeline (native once) — same as portrait End Turn.
+      await endTurn(combat, state, { combatantId: combatant.id }, requestUser);
+      return;
     }
     if ((getState(combat)?.activeCombatantId ?? null) == null) await clearNativeTurn(combat);
     return;
@@ -1996,7 +2031,7 @@ async function dispatchGMRequest(payload) {
       return await delayCombatant(combat, state, payload, requestUser);
     case REQUESTS.MARK_ACTED:
       if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
-      return await markCombatantActed(combat, state, payload);
+      return await markCombatantActed(combat, state, payload, requestUser);
     case REQUESTS.UNDO:
       if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await undo(combat, state);
