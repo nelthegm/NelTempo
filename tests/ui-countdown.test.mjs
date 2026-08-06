@@ -26,7 +26,7 @@ assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.6-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.6/dynamic-initiative.zip",
 );
 assert.equal(SETTINGS.INTERFACE_SCALE, "interfaceScale");
 assert.equal(REQUESTS.COUNTDOWN_SET, "countdown-set");

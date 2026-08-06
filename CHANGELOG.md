@@ -8,7 +8,7 @@
 - **Guard Incomplete Phase = On** opens the actionable dialog (Return / Process Remaining / Advance Without Processing); never warn-only.
 - Portrait GM checkmark routes through End Turn (native once), not a silent mark-ended flag.
 - Dialog-render failure still offers a GM force-advance fallback.
-- Manifest prepared for `v0.3.6-rc1`.
+- Runtime acceptance passed on Foundry 14.365 and PF2e 8.4.0; promoted to stable `v0.3.6`.
 
 ## 0.3.5
 

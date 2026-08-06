@@ -33,7 +33,7 @@ assert.equal(moduleJson.version, "0.3.6");
 assert.equal(moduleJson.id, MODULE_ID);
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.6-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.6/dynamic-initiative.zip",
 );
 assert.equal(SETTINGS.GUARD_INCOMPLETE_PHASE, "guardIncompletePhase");
 
