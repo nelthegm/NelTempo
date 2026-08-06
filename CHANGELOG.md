@@ -10,7 +10,8 @@
 - Portrait lifecycle status pips (pending / ready / ended / review / skipped).
 - Public `neltempo.*` lifecycle hooks (sanitized presentation notifications).
 - Safe mid-combat migration from 0.3.4 without retroactive effect processing.
-- Schema 6. Implementation build download points at `v0.3.5-rc1` until stable promotion.
+- Schema 6.
+- Runtime acceptance passed on Foundry 14.365 and PF2e 8.4.0; promoted to stable `v0.3.5`.
 
 ## 0.3.4
 

@@ -23,7 +23,7 @@ assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5/dynamic-initiative.zip",
 );
 
 assert.equal(SETTINGS.PORTRAIT_SCALE, "portraitScale");

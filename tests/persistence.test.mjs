@@ -25,7 +25,7 @@ assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.3.5/dynamic-initiative.zip",
 );
 assert.equal(moduleJson.manifest, "https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json");
 

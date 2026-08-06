@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This channel currently serves the **0.3.5** implementation build (RC download URL until stable promotion). Phase turn lifecycle timing: start-of-turn at phase activation; individual End Turn for PF2e end-of-turn. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.5**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. Phase turn lifecycle timing: start-of-turn at phase activation; individual End Turn for PF2e end-of-turn. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.5-rc1/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.3.5/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 
