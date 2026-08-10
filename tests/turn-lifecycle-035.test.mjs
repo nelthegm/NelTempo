@@ -41,7 +41,7 @@ import { PHASES, createState, normalizeState } from "../scripts/state.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.6");
+assert.equal(moduleJson.version, "0.4.0");
 assert.equal(moduleJson.id, MODULE_ID);
 
 // Settings keys
@@ -89,7 +89,7 @@ state = markCombatantEndResult(state, "a", { ok: true });
 state = markTurnEnded(state, "a", { userId: "u1" }).state;
 assert.equal(state.lifecycle.turns.a.endStatus, BOUNDARY_STATUS.COMPLETED);
 assert.equal(canEndTurn(state.lifecycle, "a"), false);
-assert.equal(canReopenTurn(state.lifecycle, "a"), false);
+assert.equal(canReopenTurn(state.lifecycle, "a"), true);
 assert.equal(combatantLifecycleUiStatus(state.lifecycle, "a"), "ended");
 assert.equal(phaseAdvanceReady(state.lifecycle), false);
 
@@ -136,7 +136,7 @@ legacy.lifecycle.turns.pc1.startStatus = BOUNDARY_STATUS.COMPLETED;
 legacy.lifecycle.turns.pc1.ended = true;
 legacy.lifecycle.turns.pc1.endStatus = BOUNDARY_STATUS.PENDING;
 const migrated = normalizeState(legacy, { combatantIds: ["pc1"] });
-assert.equal(migrated.schema, 6);
+assert.equal(migrated.schema, 7);
 assert.equal(migrated.lifecycleMigrationNotice, true);
 assert.equal(migrated.lifecycle.turns.pc1.startStatus, BOUNDARY_STATUS.COMPLETED);
 assert.equal(migrated.lifecycle.turns.pc1.endStatus, BOUNDARY_STATUS.PENDING);

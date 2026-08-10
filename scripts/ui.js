@@ -1,5 +1,5 @@
 import { MODULE_ID, PHASE_BAR_LAYOUTS, REQUESTS, SETTINGS } from "./constants.js";
-import { getPlacementEditorProjection, requestAction } from "./controller.js";
+import { getCombatantControlsProjection, getPlacementEditorProjection, requestAction } from "./controller.js";
 import { formatCountdownDisplay, sanitizeCountdown } from "./countdown.js";
 import { rollDynamicInitiative } from "./initiative.js";
 import {
@@ -13,6 +13,8 @@ import {
   lifecycleProgress,
   LIFECYCLE_STATUS,
   phaseAdvanceReady,
+  retryableEndCandidates,
+  retryableStartCandidates,
 } from "./lifecycle.js";
 import { shouldGuardIncompletePhase } from "./controller.js";
 import { PLACEMENT_MODES, PLACEMENTS, placementForCurrentRound, queuedCorrectionFor } from "./placement-editor.js";
@@ -139,6 +141,8 @@ function canUserEndTurn(combatant, state) {
 function canUserReopen(combatant, state) {
   if (!isLifecyclePhase(state.phase) || !state.lifecycle) return false;
   if (!canReopenTurn(state.lifecycle, combatant.id)) return false;
+  const lifecycleStatus = getCombatantLifecycleStatus(state.lifecycle, combatant.id);
+  if (!game.user.isGM && (lifecycleStatus.turnComplete || lifecycleStatus.turnSkipped)) return false;
   const enforce = isTimingEnforced();
   const eligibility = evaluateReopenEligibility(state.lifecycle, combatant.id, {
     isGM: game.user.isGM,
@@ -225,19 +229,19 @@ function delayTooltip(combatant, state) {
 }
 
 function statusFor(combatant, state) {
-  if (isUnconscious(combatant)) return "Unconscious · Rearguard";
   if (state.phase === PHASES.INITIATIVE) {
     const result = resultForCurrentRound(state, combatant.id);
     if (!result) return "Awaiting roll";
-    if (result.forced) return "Rearguard";
+    if (result.forced) return phaseLabel(result.phase);
     return `${result.label ?? result.skill}: ${result.total} · ${phaseLabel(result.phase)}`;
   }
+  if (isUnconscious(combatant)) return "Unconscious · Rearguard";
   if (lifecycleBusy(state)) return t("NDI.Lifecycle.StartingPhase").replace("…", "");
   if (state.lifecycle?.status === LIFECYCLE_STATUS.ENDING) return t("NDI.Lifecycle.EndingPhase");
   if (state.lifecycle) {
     const life = getCombatantLifecycleStatus(state.lifecycle, combatant.id);
-    if (life.turnSkipped) return t("NDI.Lifecycle.Status.Skipped");
     if (life.needsReview) return t("NDI.Lifecycle.Status.Review");
+    if (life.turnSkipped) return t("NDI.Lifecycle.Status.Skipped");
     if (life.turnComplete) return t("NDI.Control.Ended");
   } else if (isTurnFinished(state, combatant.id)) {
     return t("NDI.Control.Ended");
@@ -303,7 +307,7 @@ function portraitHTML(combatant, state) {
     state.phase === PHASES.INITIATIVE &&
     ownerCanRoll &&
     !isUnconscious(combatant) &&
-    (!result || combatantPhase(state, combatant.id, combatantSide(combatant)) === PLACEMENTS.PENDING)
+    combatantPhase(state, combatant.id, combatantSide(combatant)) === PLACEMENTS.PENDING
       ? `<button type="button" class="ndi-mini-button" data-action="roll" data-combatant-id="${combatant.id}" aria-label="${escapeHTML(t("NDI.Control.Roll"))}">
            <i class="fa-solid fa-dice-d20"></i> ${escapeHTML(t("NDI.Control.Roll"))}
          </button>`
@@ -320,7 +324,7 @@ function portraitHTML(combatant, state) {
 
   // GM shortcut: unresolved → End Turn (native); resolved → Restore when reopenable.
   // Never use a silent mark-ended without processing.
-  const gmCorrect = game.user.isGM && state.phase !== PHASES.INITIATIVE && lifecycleIsOpen(state)
+  const gmCorrect = game.user.isGM && !life?.needsReview && state.phase !== PHASES.INITIATIVE && lifecycleIsOpen(state)
     ? `<button type="button" class="ndi-icon-button ndi-gm-correct" data-action="${finished ? "reopen-turn" : "end-turn"}" data-combatant-id="${combatant.id}" title="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.EndTurn"))}" aria-label="${finished ? escapeHTML(t("NDI.Control.RestoreTurn")) : escapeHTML(t("NDI.Control.EndTurn"))}" ${finished && !canUserReopen(combatant, state) ? "disabled aria-disabled=\"true\"" : ""}>
          <i class="fa-solid ${finished ? "fa-rotate-left" : "fa-check"}"></i>
        </button>`
@@ -465,7 +469,7 @@ function initiativeStageHTML(combatants, state) {
 
   for (const combatant of combatants) {
     const phase = combatantPhase(state, combatant.id, combatantSide(combatant));
-    if (isUnconscious(combatant) || phase === PHASES.REARGUARD) rearguard.push(combatant);
+    if (phase === PHASES.REARGUARD) rearguard.push(combatant);
     else if (phase === PHASES.VANGUARD) vanguard.push(combatant);
     else awaiting.push(combatant);
   }
@@ -838,18 +842,22 @@ function gmRecoveryControlsHTML(state) {
     || (status === LIFECYCLE_STATUS.INTERRUPTED && state.lifecycle.end?.startedAt);
 
   if (endingContext || endFailed) {
-    return `<button type="button" data-action="retry-failed-end" title="${escapeHTML(t("NDI.Control.RetryFailedEnd"))}">
+    const retry = retryableEndCandidates(state.lifecycle).length
+      ? `<button type="button" data-action="retry-failed-end" title="${escapeHTML(t("NDI.Control.RetryFailedEnd"))}">
         <i class="fa-solid fa-rotate"></i> ${escapeHTML(t("NDI.Control.RetryFailedEnd"))}
-      </button>
-      <button type="button" data-action="skip-failed-end" title="${escapeHTML(t("NDI.Control.SkipFailedEnd"))}">
+      </button>`
+      : "";
+    return `${retry}<button type="button" data-action="skip-failed-end" title="${escapeHTML(t("NDI.Control.SkipFailedEnd"))}">
         <i class="fa-solid fa-forward"></i> ${escapeHTML(t("NDI.Control.SkipFailedEnd"))}
       </button>`;
   }
   if (startFailed) {
-    return `<button type="button" data-action="retry-failed-start" title="${escapeHTML(t("NDI.Control.RetryFailedStart"))}">
+    const retry = retryableStartCandidates(state.lifecycle).length
+      ? `<button type="button" data-action="retry-failed-start" title="${escapeHTML(t("NDI.Control.RetryFailedStart"))}">
         <i class="fa-solid fa-rotate"></i> ${escapeHTML(t("NDI.Control.RetryFailedStart"))}
-      </button>
-      <button type="button" data-action="skip-failed-start" title="${escapeHTML(t("NDI.Control.SkipFailedStart"))}">
+      </button>`
+      : "";
+    return `${retry}<button type="button" data-action="skip-failed-start" title="${escapeHTML(t("NDI.Control.SkipFailedStart"))}">
         <i class="fa-solid fa-forward"></i> ${escapeHTML(t("NDI.Control.SkipFailedStart"))}
       </button>`;
   }
@@ -914,6 +922,18 @@ async function confirmEndCombat() {
     });
   }
   return window.confirm("End this combat encounter?");
+}
+
+async function confirmDialog(title, content) {
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (DialogV2?.confirm) {
+    return DialogV2.confirm({
+      window: { title },
+      content: `<p>${escapeHTML(content)}</p>`,
+      yes: { default: true },
+    });
+  }
+  return window.confirm(`${title}\n\n${content}`);
 }
 
 function lifecycleStatusPip(combatant, state) {
@@ -1022,10 +1042,171 @@ function placementPhaseLabel(phase) {
     case PLACEMENTS.REARGUARD:
       return t("NDI.Phase.Rearguard");
     case PLACEMENTS.PENDING:
-      return t("NDI.Placement.Pending");
+      return t("NDI.Placement.AwaitingRoll");
     default:
       return phase;
   }
+}
+
+function yesNo(value) {
+  return value ? t("NDI.Common.Yes") : t("NDI.Common.No");
+}
+
+async function openLifecycleInspector(combatantId) {
+  if (!game.user.isGM) return;
+  const combat = getCombat();
+  const combatant = getCombatant(combat, combatantId);
+  const projection = getCombatantControlsProjection(combat, combatantId);
+  const state = getState(combat);
+  if (!combatant || !projection || !state) return;
+
+  const result = resultForCurrentRound(state, combatantId);
+  const currentResult = !result
+    ? t("NDI.Placement.AwaitingRoll")
+    : result.phase === PHASES.VANGUARD
+      ? t("NDI.Inspector.Success")
+      : result.phase === PHASES.REARGUARD
+        ? t("NDI.Inspector.Failure")
+        : placementPhaseLabel(result.phase);
+  const life = projection.inspection;
+  const primaryGM = game.users?.activeGM ?? game.users
+    ?.filter?.((user) => user.active && user.isGM)
+    ?.sort?.((a, b) => String(a.id).localeCompare(String(b.id)))?.[0];
+  const turnStatus = state.activeCombatantId === combatantId
+    ? t("NDI.Inspector.TakingTurn")
+    : life?.turnStatus ?? t("NDI.Inspector.NotInLifecycle");
+  const boundaryRows = (label, boundary) => boundary
+    ? `<section class="ndi-inspector-section">
+        <h3>${escapeHTML(label)}</h3>
+        <dl>
+          <dt>${escapeHTML(t("NDI.Inspector.Claimed"))}</dt><dd>${escapeHTML(yesNo(boundary.claimed))}</dd>
+          <dt>${escapeHTML(t("NDI.Inspector.Processed"))}</dt><dd>${escapeHTML(yesNo(boundary.processed))}</dd>
+          <dt>${escapeHTML(t("NDI.Inspector.Completed"))}</dt><dd>${escapeHTML(yesNo(boundary.completed))}</dd>
+          <dt>${escapeHTML(t("NDI.Inspector.Status"))}</dt><dd>${escapeHTML(boundary.status)}</dd>
+          ${boundary.reason ? `<dt>${escapeHTML(t("NDI.Inspector.Reason"))}</dt><dd>${escapeHTML(boundary.reason)}</dd>` : ""}
+        </dl>
+      </section>`
+    : "";
+  const content = `<div class="ndi-lifecycle-inspector">
+    <p><strong>${escapeHTML(combatantName(combatant))}</strong></p>
+    <dl>
+      <dt>${escapeHTML(t("NDI.Inspector.Phase"))}</dt><dd>${escapeHTML(phaseLabel(state.phase))}</dd>
+      <dt>${escapeHTML(t("NDI.Inspector.CurrentResult"))}</dt><dd>${escapeHTML(currentResult)}</dd>
+      <dt>${escapeHTML(t("NDI.Inspector.Lane"))}</dt><dd>${escapeHTML(placementPhaseLabel(projection.lane))}</dd>
+      <dt>${escapeHTML(t("NDI.Inspector.TurnStatus"))}</dt><dd>${escapeHTML(turnStatus)}</dd>
+      <dt>${escapeHTML(t("NDI.Inspector.Round"))}</dt><dd>${escapeHTML(String(state.round))}</dd>
+      <dt>${escapeHTML(t("NDI.Inspector.Authority"))}</dt><dd>${escapeHTML(primaryGM?.name ?? t("NDI.Inspector.NoPrimaryGM"))}</dd>
+      ${life?.administrativeStatus ? `<dt>${escapeHTML(t("NDI.Inspector.Administrative"))}</dt><dd>${escapeHTML(life.administrativeStatus)}</dd>` : ""}
+      ${life?.reopened ? `<dt>${escapeHTML(t("NDI.Inspector.Reopened"))}</dt><dd>${escapeHTML(yesNo(true))}</dd>` : ""}
+    </dl>
+    ${boundaryRows(t("NDI.Inspector.StartBoundary"), life?.start)}
+    ${boundaryRows(t("NDI.Inspector.EndBoundary"), life?.end)}
+  </div>`;
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) return notifyFallback(content);
+  await DialogV2.wait({
+    window: { title: t("NDI.Inspector.Title") },
+    content,
+    buttons: [{ action: "close", label: t("NDI.Placement.Close"), default: true }],
+  });
+}
+
+async function openCombatantControls(combatantId) {
+  if (!game.user.isGM) return;
+  const combat = getCombat();
+  const combatant = getCombatant(combat, combatantId);
+  const projection = getCombatantControlsProjection(combat, combatantId);
+  if (!combatant || !projection) return;
+  const actionButton = (action, label, enabled, title = label, extra = "") =>
+    `<button type="button" data-combatant-control="${action}" ${extra} ${enabled ? "" : "disabled aria-disabled=\"true\""} title="${escapeHTML(title)}">${escapeHTML(label)}</button>`;
+  const optionFor = (phase) => projection.placement.currentRoundOptions.find((option) => option.phase === phase);
+  const placementButton = (phase, label, contextAllowed = true) => {
+    const option = optionFor(phase);
+    const allowed = Boolean(option?.allowed && contextAllowed);
+    const title = allowed ? label : placementReasonText(option?.reason ?? "pending-unsafe");
+    return actionButton("placement", label, allowed, title, `data-placement-phase="${phase}"`);
+  };
+  const life = projection.actions;
+  const content = `<div class="ndi-combatant-controls">
+    <p><strong>${escapeHTML(combatantName(combatant))}</strong></p>
+    <section><h3>${escapeHTML(t("NDI.Controls.TurnLifecycle"))}</h3><div class="ndi-control-grid">
+      ${actionButton("process-start", t("NDI.Controls.ProcessStart"), life.processStart, t("NDI.Controls.ProcessStartHint"))}
+      ${actionButton("retry-start", t("NDI.Controls.RetryStart"), life.retryStart, life.retryStart ? t("NDI.Controls.RetrySafeHint") : t("NDI.Controls.RetryUnsafeHint"))}
+      ${actionButton("end-turn", t("NDI.Control.EndTurn"), life.endTurn, t("NDI.Controls.EndTurnHint"))}
+      ${actionButton("retry-end", t("NDI.Controls.RetryEnd"), life.retryEnd, life.retryEnd ? t("NDI.Controls.RetrySafeHint") : t("NDI.Controls.RetryUnsafeHint"))}
+      ${actionButton("reopen", t("NDI.Control.ReopenTurn"), life.reopen, t("NDI.Controls.ReopenWarning"))}
+    </div></section>
+    <section><h3>${escapeHTML(t("NDI.Controls.Administrative"))}</h3><div class="ndi-control-grid">
+      ${actionButton("mark-complete", t("NDI.Control.MarkComplete"), life.markComplete, t("NDI.Controls.MarkCompleteHint"))}
+      ${actionButton("mark-skipped", t("NDI.Control.MarkSkipped"), life.markSkipped, t("NDI.Controls.MarkSkippedHint"))}
+      ${actionButton("mark-review", t("NDI.Controls.MarkReview"), life.markReview, t("NDI.Controls.MarkReviewHint"))}
+    </div></section>
+    <section><h3>${escapeHTML(t("NDI.Controls.PhaseInitiative"))}</h3><div class="ndi-control-grid">
+      ${placementButton(PLACEMENTS.VANGUARD, t("NDI.Controls.MoveVanguard"))}
+      ${placementButton(PLACEMENTS.ENEMY, t("NDI.Controls.MoveEnemy"))}
+      ${placementButton(PLACEMENTS.REARGUARD, t("NDI.Controls.MoveRearguard"))}
+      ${placementButton(PLACEMENTS.PENDING, t("NDI.Controls.ResetAwaiting"), life.resetAwaiting)}
+      ${actionButton("edit-initiative", t("NDI.Controls.EditInitiative"), true)}
+    </div></section>
+    <section><h3>${escapeHTML(t("NDI.Controls.Diagnostics"))}</h3><div class="ndi-control-grid">
+      ${actionButton("inspect", t("NDI.Controls.InspectLifecycle"), true)}
+    </div></section>
+  </div>`;
+  const DialogV2 = foundry?.applications?.api?.DialogV2;
+  if (!DialogV2?.wait) return notifyFallback(content);
+  await DialogV2.wait({
+    window: { title: t("NDI.Controls.Title") },
+    content,
+    buttons: [{ action: "close", label: t("NDI.Placement.Close"), default: true }],
+    render: (_event, dialog) => {
+      const root = dialog?.element ?? dialog;
+      root?.querySelectorAll?.("[data-combatant-control]")?.forEach((button) => {
+        button.addEventListener("click", async (event) => {
+          event.preventDefault();
+          if (button.disabled) return;
+          const action = button.dataset.combatantControl;
+          if (action === "inspect") {
+            dialog.close?.();
+            await openLifecycleInspector(combatantId);
+            return;
+          }
+          if (action === "edit-initiative") {
+            dialog.close?.();
+            await openPlacementEditor(combatantId);
+            return;
+          }
+          if (action === "reopen" && !await confirmDialog(t("NDI.Control.ReopenTurn"), t("NDI.Controls.ReopenWarning"))) return;
+          if (action === "mark-complete" && !await confirmDialog(t("NDI.Control.MarkComplete"), t("NDI.Controls.MarkCompleteHint"))) return;
+          if (action === "mark-skipped" && !await confirmDialog(t("NDI.Control.MarkSkipped"), t("NDI.Controls.MarkSkippedHint"))) return;
+          dialog.close?.();
+          const requests = {
+            "process-start": REQUESTS.START_TURN_NOW,
+            "retry-start": REQUESTS.RETRY_COMBATANT_START,
+            "end-turn": REQUESTS.END_TURN,
+            "retry-end": REQUESTS.RETRY_COMBATANT_END,
+            reopen: REQUESTS.REOPEN_TURN,
+            "mark-complete": REQUESTS.MARK_TURN_COMPLETE,
+            "mark-skipped": REQUESTS.MARK_TURN_SKIPPED,
+            "mark-review": REQUESTS.MARK_LIFECYCLE_REVIEW,
+          };
+          if (action === "placement") {
+            await requestAction(REQUESTS.PLACEMENT_APPLY, {
+              combatantId,
+              targetPhase: button.dataset.placementPhase,
+              mode: PLACEMENT_MODES.CURRENT_ROUND,
+              expectedRevision: projection.placement.revision,
+            });
+            return;
+          }
+          const type = requests[action];
+          if (type) await requestAction(type, {
+            combatantId,
+            timingOverrideConfirmed: action === "reopen" && life.reopenRequiresTimingOverride,
+          });
+        });
+      });
+    },
+  });
 }
 
 async function openPlacementEditor(combatantId) {
@@ -1187,7 +1368,7 @@ function bindDockEvents(root, combat, state) {
     if (!combatantId || !getCombatant(combat, combatantId)) return;
     event.preventDefault();
     event.stopPropagation();
-    void openPlacementEditor(combatantId);
+    void openCombatantControls(combatantId);
   });
 
   root.addEventListener("click", async (event) => {
@@ -1582,7 +1763,10 @@ export async function openInitiativePrompt(combatantId, promptData = null) {
   const currentResult = Number(state.round ?? 1) === effectiveRound
     ? resultForCurrentRound(state, combatant.id)
     : null;
-  if (currentResult || isUnconscious(combatant)) return;
+  const currentLane = Number(state.round ?? 1) === effectiveRound
+    ? combatantPhase(state, combatant.id, combatantSide(combatant))
+    : PLACEMENTS.PENDING;
+  if (currentResult || currentLane !== PLACEMENTS.PENDING || isUnconscious(combatant)) return;
   if (!effectivePromptId) return;
 
   const promptKey = `${combat.id}.${effectivePromptId}.${combatant.id}`;

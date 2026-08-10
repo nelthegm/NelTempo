@@ -22,6 +22,7 @@ const INCLUDE = [
   "scripts/constants.js",
   "scripts/controller.js",
   "scripts/initiative.js",
+  "scripts/initiative-lane.js",
   "scripts/lifecycle.js",
   "scripts/lifecycle-hooks.js",
   "scripts/main.js",
@@ -51,6 +52,8 @@ const INCLUDE = [
   "docs/SLICE_0_3_5_PHASE_TURN_LIFECYCLE.md",
   "docs/SLICE_0_3_5_TEST_PLAN.md",
   "docs/SLICE_0_3_6_TURN_COMPLETION.md",
+  "docs/SLICE_0_4_0_COMBATANT_CONTROLS.md",
+  "docs/SLICE_0_4_0_TEST_PLAN.md",
 ];
 
 function ensureIncludes() {

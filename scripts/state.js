@@ -5,9 +5,9 @@ import {
   normalizePlacementAudit,
   normalizePlacementCorrections,
   normalizePlacements,
-  placementForCurrentRound,
 } from "./placement-editor.js";
 import { sanitizeCountdown } from "./countdown.js";
+import { selectCombatantInitiativeLane } from "./initiative-lane.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -33,7 +33,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -331,13 +331,17 @@ export function reclassifyResults(state) {
   return next;
 }
 
+/**
+ * Canonical current-round initiative lane selector.
+ * Absence of a party result is Pending/Awaiting, never an inferred failure.
+ */
+export function getCombatantInitiativeLane(state, combatantId, side = "party") {
+  return selectCombatantInitiativeLane(state, combatantId, side);
+}
+
+/** Backward-compatible name used by phase roster and UI code. */
 export function combatantPhase(state, combatantId, side = "party") {
-  const placement = placementForCurrentRound(state, combatantId);
-  if (placement?.phase === PLACEMENTS.PENDING) return PLACEMENTS.PENDING;
-  if (placement?.phase) return placement.phase;
-  if (side === "enemy") return PHASES.ENEMY;
-  if (state.delayed?.[combatantId]) return PHASES.REARGUARD;
-  return resultForCurrentRound(state, combatantId)?.phase ?? PHASES.REARGUARD;
+  return getCombatantInitiativeLane(state, combatantId, side);
 }
 
 export function stripHistory(state) {
@@ -416,6 +420,12 @@ export function submitResult(state, combatantId, { total, skill, label = skill }
     at: Date.now(),
   };
   next.lastSkills[combatantId] = skill;
+  // A Pending placement is an invalidated current-round result. Once a new
+  // result resolves, remove that reset marker so the canonical selector can
+  // move the card immediately to Vanguard/Rearguard.
+  if (next.placements?.[combatantId]?.phase === PLACEMENTS.PENDING) {
+    delete next.placements[combatantId];
+  }
   return next;
 }
 

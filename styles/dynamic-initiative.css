@@ -1157,3 +1157,60 @@ button.ndi-countdown-pill {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.ndi-combatant-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: min(32rem, 92vw);
+}
+
+.ndi-combatant-controls section,
+.ndi-inspector-section {
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(127, 116, 135, 0.35);
+}
+
+.ndi-combatant-controls h3,
+.ndi-inspector-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ndi-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.ndi-control-grid button {
+  margin: 0;
+  min-height: 2rem;
+}
+
+.ndi-control-grid button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ndi-lifecycle-inspector {
+  min-width: min(28rem, 90vw);
+}
+
+.ndi-lifecycle-inspector dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 2fr);
+  gap: 0.25rem 0.75rem;
+  margin: 0.4rem 0;
+}
+
+.ndi-lifecycle-inspector dt {
+  font-weight: 700;
+}
+
+.ndi-lifecycle-inspector dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

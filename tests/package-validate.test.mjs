@@ -14,6 +14,7 @@ for (const file of [
   "scripts/utils.js",
   "scripts/ui.js",
   "scripts/initiative.js",
+  "scripts/initiative-lane.js",
   "scripts/shields.js",
   "scripts/constants.js",
   "scripts/lifecycle.js",

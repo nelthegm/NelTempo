@@ -24,8 +24,11 @@ import {
   beginEndBoundary,
   beginStartBoundary,
   buildRosterIds,
+  buildLifecycleInspection,
   canEndTurn,
   canReopenTurn,
+  canRetryEndBoundary,
+  canRetryStartBoundary,
   completeEndBoundary,
   completeStartBoundary,
   createLifecycle,
@@ -36,10 +39,14 @@ import {
   markCombatantEndResult,
   markCombatantStartProcessing,
   markCombatantStartResult,
+  markTurnCompleteAdministrative,
   markTurnEnded,
+  markTurnReview,
   markTurnSkipped,
   phaseAdvanceReady,
   reopenTurn,
+  retryableEndCandidates,
+  retryableStartCandidates,
   skipFailedEnds,
   skipFailedStarts,
   skipPendingEnds,
@@ -459,6 +466,13 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
   const turn = next.lifecycle?.turns?.[id];
   if (!turn) return { state: next, ok: false, reason: "missing-turn" };
   if (turn.endStatus === BOUNDARY_STATUS.COMPLETED || turn.endStatus === BOUNDARY_STATUS.SKIPPED) {
+    if (turn.reopened) {
+      const closed = markTurnEnded(next, id, { userId });
+      next = closed.changed ? applyEndTurnTiming(closed.state, id) : next;
+      await persistState(combat, next, "reopened-turn-closed");
+      emitCombatantTurnEnded(combat, next, id);
+      return { state: next, ok: true, reason: "settled-boundary-preserved" };
+    }
     return { state: next, ok: true, reason: "already-complete" };
   }
 
@@ -467,6 +481,10 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
   const endRound = Number(next.round ?? combat.round);
   if (Number.isFinite(roundOfLastEnd) && roundOfLastEnd === endRound) {
     next = markCombatantEndResult(next, id, { ok: true });
+    const marked = markTurnEnded(next, id, { userId });
+    next = marked.changed ? applyEndTurnTiming(marked.state, id) : next;
+    await persistState(combat, next, "combatant-end-already");
+    emitCombatantTurnEnded(combat, next, id);
     return { state: next, ok: true, reason: "already-ended-this-round" };
   }
 
@@ -529,12 +547,20 @@ async function finalizePhaseLeave(combat, state, { forced = false } = {}) {
 }
 
 /** Recovery path for failed individual ends — still may invoke native end once. */
-async function runEndBoundary(combat, state, { onlyFailedOrInterrupted = false, forced = false } = {}) {
+async function runEndBoundary(
+  combat,
+  state,
+  { onlyFailedOrInterrupted = false, onlyCombatantIds = null, forced = false } = {},
+) {
   let next = beginEndBoundary(state, { forced });
   await persistState(combat, next, "phase-end-begin");
   lifecycleDiag("phase-end-begin", combat, next, { forced: Boolean(forced) });
 
-  const candidates = endCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  let candidates = endCandidates(next.lifecycle, { onlyFailedOrInterrupted });
+  if (Array.isArray(onlyCombatantIds) && onlyCombatantIds.length) {
+    const allow = new Set(onlyCombatantIds.map(String));
+    candidates = candidates.filter((id) => allow.has(String(id)));
+  }
   let failed = false;
 
   for (const combatantId of candidates) {
@@ -606,6 +632,17 @@ async function runEndBoundary(combat, state, { onlyFailedOrInterrupted = false, 
     await persistState(combat, next, "phase-end-error");
     lifecycleDiag("lifecycle-error", combat, next, { boundary: "end" });
     notify("error", localize("NDI.Lifecycle.EndFailed"));
+    return { state: next, ok: false };
+  }
+
+  // A conservative retry may intentionally leave ambiguous Interrupted/threw
+  // entries in Review. Never declare the phase end complete in that case.
+  if (Array.isArray(onlyCombatantIds) && endCandidates(next.lifecycle).length > 0) {
+    next = structuredClone(next);
+    next.lifecycle.status = LIFECYCLE_STATUS.ERROR;
+    next.lifecycle.end.status = BOUNDARY_STATUS.FAILED;
+    next.lifecycle.end.completedAt = Date.now();
+    await persistState(combat, next, "phase-end-review-remains");
     return { state: next, ok: false };
   }
 
@@ -855,7 +892,7 @@ async function promptInitiative(combat, state) {
   }
 
   const next = withHistory(state, "Prompt initiative");
-  next.schema = 3;
+  next.schema = 7;
   for (const combatantId of Object.keys(next.results ?? {})) {
     if (!resultForCurrentRound(next, combatantId)) delete next.results[combatantId];
   }
@@ -902,6 +939,9 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
   const combatant = getCombatant(combat, payload.combatantId);
   if (!combatant || combatantSide(combatant) !== "party") throw new Error(localize("NDI.Error.InvalidPlayerCombatant"));
   if (!userCanOwnCombatant(requestUser, combatant)) throw new Error(localize("NDI.Error.NotOwner"));
+  if (combatantPhase(state, combatant.id, "party") !== PLACEMENTS.PENDING) {
+    throw new Error(localize("NDI.Error.InitiativeAlreadyResolved"));
+  }
 
   const next = submitResult(state, combatant.id, {
     total: payload.total,
@@ -1121,6 +1161,10 @@ async function reopenCombatantTurn(combat, state, payload, requestUser) {
   }
 
   let liveState = refreshCombatantTiming(combat, getState(combat) ?? state, combatant.id);
+  const lifecycleStatus = getCombatantLifecycleStatus(liveState.lifecycle, combatant.id);
+  if (!requestUser.isGM && (lifecycleStatus.turnComplete || lifecycleStatus.turnSkipped)) {
+    throw new Error(localize("NDI.Error.GmOnly"));
+  }
   if (!canReopenTurn(liveState.lifecycle, combatant.id)) {
     throw new Error(localize("NDI.Lifecycle.CannotReopen"));
   }
@@ -1277,13 +1321,18 @@ async function retryFailedStart(combat, state) {
     }
   }
   lifecycleDiag("lifecycle-recovery-requested", combat, state, { action: "retry-start" });
+  const retryable = retryableStartCandidates(state.lifecycle);
+  if (!retryable.length) throw new Error(localize("NDI.Lifecycle.RetryUnsafe"));
   // Reset overall status so start can resume; keep completed combatants.
   let next = structuredClone(state);
   next.lifecycle.status = LIFECYCLE_STATUS.STARTING;
   next.lifecycle.start.status = BOUNDARY_STATUS.PROCESSING;
   next.lifecycle.start.failedCombatants = [];
   await persistState(combat, next, "retry-failed-start");
-  next = await runStartBoundary(combat, next, { onlyFailedOrInterrupted: true });
+  next = await runStartBoundary(combat, next, {
+    onlyFailedOrInterrupted: true,
+    onlyCombatantIds: retryable,
+  });
   return next;
 }
 
@@ -1311,12 +1360,17 @@ async function retryFailedEnd(combat, state) {
     throw new Error(localize("NDI.Lifecycle.NoFailedEnd"));
   }
   lifecycleDiag("lifecycle-recovery-requested", combat, state, { action: "retry-end" });
+  const retryable = retryableEndCandidates(state.lifecycle);
+  if (!retryable.length) throw new Error(localize("NDI.Lifecycle.RetryUnsafe"));
   let next = structuredClone(state);
   next.lifecycle.status = LIFECYCLE_STATUS.ENDING;
   next.lifecycle.end.status = BOUNDARY_STATUS.PROCESSING;
   next.lifecycle.end.failedCombatants = [];
   await persistState(combat, next, "retry-failed-end");
-  const endResult = await runEndBoundary(combat, next, { onlyFailedOrInterrupted: true });
+  const endResult = await runEndBoundary(combat, next, {
+    onlyFailedOrInterrupted: true,
+    onlyCombatantIds: retryable,
+  });
   if (!endResult.ok) return endResult.state;
 
   // After successful end recovery, enter the next phase.
@@ -1730,6 +1784,8 @@ async function runSingleCombatantStart(combat, state, combatantId) {
   );
   if (Number.isFinite(roundOfLastTurn) && roundOfLastTurn === Number(next.round ?? combat.round)) {
     next = markCombatantStartResult(next, id, { ok: true });
+    next = await expireDefensesForCombatant(combat, next, id);
+    emitCombatantTurnReady(combat, next, id);
     next = pushPlacementAudit(next, "placement-start-boundary-preserved", {
       combatantId: shortId(id),
       reason: "already-started-this-round",
@@ -1749,6 +1805,7 @@ async function runSingleCombatantStart(combat, state, combatantId) {
 
   next = markCombatantStartProcessing(next, id);
   await persistState(combat, next, "placement-start-processing");
+  emitCombatantTurnStarted(combat, next, id);
   next = pushPlacementAudit(next, "placement-start-boundary-invoked", {
     combatantId: shortId(id),
     round: String(next.round),
@@ -1758,15 +1815,114 @@ async function runSingleCombatantStart(combat, state, combatantId) {
   const result = await processStartTurn(combat, id);
   if (result.ok) {
     next = markCombatantStartResult(next, id, { ok: true });
+    next = await expireDefensesForCombatant(combat, next, id);
+    emitCombatantTurnReady(combat, next, id);
   } else {
     next = markCombatantStartResult(next, id, {
       ok: false,
       reason: adapterReasonMessage(result),
     });
     next.lifecycle.status = LIFECYCLE_STATUS.ERROR;
+    emitLifecycleReview(combat, next, id, "start");
     notify("error", localize("NDI.Lifecycle.StartFailed"));
   }
   return next;
+}
+
+async function processCombatantStartNow(combat, state, payload, requestUser, { retry = false } = {}) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const live = getState(combat) ?? state;
+  const turn = live.lifecycle?.turns?.[combatant.id];
+  if (!live.lifecycle?.roster?.includes(combatant.id) || !turn) {
+    throw new Error(localize("NDI.Lifecycle.NotInRoster"));
+  }
+  if (retry) {
+    if (!canRetryStartBoundary(live.lifecycle, combatant.id)) {
+      throw new Error(localize("NDI.Lifecycle.RetryUnsafe"));
+    }
+  } else if (turn.startStatus !== BOUNDARY_STATUS.PENDING) {
+    throw new Error(localize("NDI.Lifecycle.StartAlreadyClaimed"));
+  }
+  if (![LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE, LIFECYCLE_STATUS.ERROR].includes(live.lifecycle.status)) {
+    throw new Error(localize("NDI.Lifecycle.NotOpen"));
+  }
+  let next = withHistory(live, `${retry ? "Retry" : "Process"} start turn ${combatant.id}`);
+  if (next.lifecycle.status === LIFECYCLE_STATUS.COMPLETE || next.lifecycle.status === LIFECYCLE_STATUS.ERROR) {
+    next.lifecycle.status = LIFECYCLE_STATUS.OPEN;
+  }
+  next = await runSingleCombatantStart(combat, next, combatant.id);
+  await persistState(combat, next, retry ? "retry-combatant-start" : "process-combatant-start");
+  return next;
+}
+
+async function retryCombatantEnd(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const live = getState(combat) ?? state;
+  if (!canRetryEndBoundary(live.lifecycle, combatant.id)) {
+    throw new Error(localize("NDI.Lifecycle.RetryUnsafe"));
+  }
+  let next = withHistory(live, `Retry end turn ${combatant.id}`);
+  next.lifecycle.status = LIFECYCLE_STATUS.OPEN;
+  const result = await processIndividualEndTurn(combat, next, combatant.id, { userId: requestUser.id });
+  if (!result.ok) return result.state;
+  await clearNativeTurn(combat);
+  if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+    await maybeAutoAdvance(combat, result.state);
+  }
+  return result.state;
+}
+
+async function markCombatantComplete(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const result = markTurnCompleteAdministrative(
+    withHistory(getState(combat) ?? state, `Mark complete ${combatant.id}`),
+    combatant.id,
+    { userId: requestUser.id },
+  );
+  if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  await persistState(combat, result.state, "mark-turn-complete");
+  await clearNativeTurn(combat);
+  if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+    await maybeAutoAdvance(combat, result.state);
+  }
+  return result.state;
+}
+
+async function markCombatantSkipped(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const result = markTurnSkipped(
+    withHistory(getState(combat) ?? state, `Mark skipped ${combatant.id}`),
+    combatant.id,
+    { userId: requestUser.id, reason: "gm-mark-skipped" },
+  );
+  if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  await persistState(combat, result.state, "mark-turn-skipped");
+  await clearNativeTurn(combat);
+  if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
+    await maybeAutoAdvance(combat, result.state);
+  }
+  return result.state;
+}
+
+async function markCombatantReview(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  const combatant = getCombatant(combat, payload.combatantId);
+  if (!combatant) throw new Error(localize("NDI.Error.InvalidCombatant"));
+  const result = markTurnReview(
+    withHistory(getState(combat) ?? state, `Mark review ${combatant.id}`),
+    combatant.id,
+  );
+  if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  await persistState(combat, result.state, "mark-lifecycle-review");
+  return result.state;
 }
 
 async function placementApply(combat, state, payload, requestUser) {
@@ -1890,7 +2046,6 @@ async function placementApply(combat, state, payload, requestUser) {
         phaseInstanceId: shortId(next.lifecycle.phaseInstanceId),
       });
       await persistState(combat, next, "placement-join");
-      next = await runSingleCombatantStart(combat, next, combatant.id);
       const reconciled = reconcileTimingState(combat, next, { reason: "placement-join" });
       next = reconciled.state;
     }
@@ -1938,6 +2093,67 @@ export function getPlacementEditorProjection(combat, combatantId) {
     side: combatantSide(combatant),
     revision: state.revision,
   });
+}
+
+export function getCombatantControlsProjection(combat, combatantId) {
+  const state = getState(combat);
+  if (!state?.enabled) return null;
+  const combatant = getCombatant(combat, combatantId);
+  if (!combatant) return null;
+  const lifecycle = state.lifecycle;
+  const turn = lifecycle?.turns?.[combatant.id] ?? null;
+  const boundaryBusy =
+    turn?.startStatus === BOUNDARY_STATUS.PROCESSING ||
+    turn?.endStatus === BOUNDARY_STATUS.PROCESSING;
+  const lifecycleMutationBusy = [
+    LIFECYCLE_STATUS.PREPARING,
+    LIFECYCLE_STATUS.STARTING,
+    LIFECYCLE_STATUS.ENDING,
+  ].includes(lifecycle?.status);
+  const lifecycleAvailable = Boolean(lifecycle?.roster?.includes(combatant.id) && turn);
+  const reopenEligibility = lifecycleAvailable
+    ? evaluateReopenEligibility(lifecycle, combatant.id, { isGM: true, enforce: isTimingEnforced() })
+    : { allowed: false, requiresOverride: false };
+  const placement = buildEditorProjection(state, combatant.id, {
+    side: combatantSide(combatant),
+    revision: state.revision,
+  });
+  return {
+    combatantId: combatant.id,
+    round: Number(state.round ?? 1),
+    phase: state.phase,
+    lane: combatantPhase(state, combatant.id, combatantSide(combatant)),
+    inspection: lifecycleAvailable ? buildLifecycleInspection(lifecycle, combatant.id) : null,
+    placement,
+    actions: {
+      processStart:
+        lifecycleAvailable &&
+        [LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(lifecycle.status) &&
+        turn.startStatus === BOUNDARY_STATUS.PENDING,
+      retryStart: lifecycleAvailable && canRetryStartBoundary(lifecycle, combatant.id),
+      endTurn: lifecycleAvailable && canEndTurn(lifecycle, combatant.id),
+      retryEnd: lifecycleAvailable && canRetryEndBoundary(lifecycle, combatant.id),
+      reopen:
+        lifecycleAvailable &&
+        canReopenTurn(lifecycle, combatant.id) &&
+        reopenEligibility.allowed,
+      reopenRequiresTimingOverride: Boolean(reopenEligibility.requiresOverride),
+      markComplete:
+        lifecycleAvailable &&
+        !boundaryBusy &&
+        !lifecycleMutationBusy &&
+        (!(turn.endStatus === BOUNDARY_STATUS.COMPLETED && turn.endProcessed) ||
+          turn.administrativeStatus === "review"),
+      markSkipped:
+        lifecycleAvailable &&
+        !boundaryBusy &&
+        !lifecycleMutationBusy &&
+        ![BOUNDARY_STATUS.COMPLETED, BOUNDARY_STATUS.SKIPPED].includes(turn.endStatus),
+      markReview: lifecycleAvailable && !boundaryBusy && !lifecycleMutationBusy,
+      resetAwaiting:
+        state.phase === PHASES.INITIATIVE && combatantSide(combatant) === "party",
+    },
+  };
 }
 
 /**
@@ -2000,8 +2216,20 @@ async function dispatchGMRequest(payload) {
       return await claimTurn(combat, state, payload, requestUser);
     case REQUESTS.END_TURN:
       return await endTurn(combat, state, payload, requestUser);
+    case REQUESTS.START_TURN_NOW:
+      return await processCombatantStartNow(combat, state, payload, requestUser);
+    case REQUESTS.RETRY_COMBATANT_START:
+      return await processCombatantStartNow(combat, state, payload, requestUser, { retry: true });
+    case REQUESTS.RETRY_COMBATANT_END:
+      return await retryCombatantEnd(combat, state, payload, requestUser);
     case REQUESTS.REOPEN_TURN:
       return await reopenCombatantTurn(combat, state, payload, requestUser);
+    case REQUESTS.MARK_TURN_COMPLETE:
+      return await markCombatantComplete(combat, state, payload, requestUser);
+    case REQUESTS.MARK_TURN_SKIPPED:
+      return await markCombatantSkipped(combat, state, payload, requestUser);
+    case REQUESTS.MARK_LIFECYCLE_REVIEW:
+      return await markCombatantReview(combat, state, payload, requestUser);
     case REQUESTS.END_REMAINING:
       if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await endRemainingTurns(combat, state, requestUser);

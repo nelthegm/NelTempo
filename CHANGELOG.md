@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Fixes unresolved current-round player initiative so portraits render in **Awaiting Roll**, never as an inferred Rearguard failure.
+- Makes current-round results authoritative across round reset, reload, player rolls, and GM corrections.
+- Adds GM-only right-click **NelTempo Combatant Controls** for explicit start/end processing, administrative Complete/Skipped/Review state, phase correction, and lifecycle inspection.
+- Records claimed versus processed lifecycle boundaries so administrative completion remains distinct from PF2e processing.
+- Reopens turn workflow without undoing PF2e mechanics or allowing an already-settled boundary to replay.
+- Exposes Retry only for adapter failures known to occur before native PF2e invocation; ambiguous throws/interruption remain Review.
+- Separates initiative/phase correction from Start Turn, End Turn, and Mark Skipped actions.
+
 ## 0.3.6
 
 - Unifies portrait, phase-header, and Advance Phase completion on one lifecycle end-boundary selector.

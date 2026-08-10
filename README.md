@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.3.6
+**Current version:** 0.4.0
 **Module ID:** `nel-dynamic-initiative`
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
 
@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel for stable **NelTempo 0.3.6**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. Fixes contradictory Ended counts and honors Guard Incomplete Phase = Off. The internal module ID remains `nel-dynamic-initiative`.
+This is the permanent Forge / Foundry install channel. **NelTempo 0.4.0** adds current-round Awaiting Roll placement plus GM combatant lifecycle controls and recovery. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.3.6/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.4.0-rc1/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 
@@ -64,6 +64,8 @@ game.dynamicInitiative.start();
 5. Players click eligible portraits to claim turns and use **End Turn** when finished.
 6. Use **Next Phase** for **Enemy**, activate enemy portraits, then advance to **Rearguard**.
 7. Advance from **Rearguard** to **Initiative** to begin the next round and prompt new checks.
+
+Right-click any combatant portrait to open **NelTempo Combatant Controls**. Lifecycle processing actions are separate from administrative corrections: **End Turn** invokes the real PF2e end boundary, while **Mark Complete**, **Mark Skipped**, and **Mark Review** never replay PF2e mechanics. **Reopen Turn** restores only the NelTempo workflow and does not undo actor changes or permit a settled boundary to run twice.
 
 ## Portrait dock layout
 

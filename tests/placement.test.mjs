@@ -43,7 +43,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // --- Baseline identity / version / tag ---
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.6");
+assert.equal(moduleJson.version, "0.4.0");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(MODULE_ID, "nel-dynamic-initiative");
@@ -59,7 +59,7 @@ assert.equal(REQUESTS.PLACEMENT_QUEUE, "placement-queue");
 assert.equal(REQUESTS.PLACEMENT_CANCEL_QUEUE, "placement-cancel-queue");
 
 const fresh = createState();
-assert.equal(fresh.schema, 6);
+assert.equal(fresh.schema, 7);
 assert.deepEqual(fresh.placements, {});
 assert.deepEqual(fresh.placementCorrections, {});
 assert.deepEqual(fresh.placementAudit, []);
@@ -151,11 +151,10 @@ state = applyCurrentRoundPlacement(state, "pc1", PLACEMENTS.REARGUARD, {
   originalPhase: PLACEMENTS.VANGUARD,
 });
 assert.equal(state.lifecycle.phaseInstanceId, phaseIdBefore);
-assert.equal(state.lifecycle.turns.pc1.skipped, true);
-assert.equal(state.lifecycle.turns.pc1.endStatus, BOUNDARY_STATUS.SKIPPED);
-assert.notEqual(state.lifecycle.turns.pc1.endStatus, BOUNDARY_STATUS.COMPLETED);
+assert.equal(state.lifecycle.turns.pc1, undefined);
+assert.equal(state.acted.pc1, undefined);
 assert.equal(combatantPhase(state, "pc1"), PLACEMENTS.REARGUARD);
-assert.equal(state.lifecycle.roster.includes("pc1"), true); // still in roster as finished/skipped
+assert.equal(state.lifecycle.roster.includes("pc1"), false);
 
 // --- Current phase join ---
 state = createState({ round: 1 });

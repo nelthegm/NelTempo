@@ -11,6 +11,7 @@ import {
   isTurnFinished,
   lifecycleProgress,
 } from "./lifecycle.js";
+import { selectCombatantInitiativeLane } from "./initiative-lane.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -336,9 +337,17 @@ export function evaluatePlacementOptions(state, combatantId, { side = "party" } 
   }
 
   // Initiative (pre-lifecycle): all current placements allowed.
-  if (state.phase === PHASES.INITIATIVE || !lifecycle) {
+  if (state.phase === PHASES.INITIATIVE) {
     for (const phase of Object.values(PLACEMENTS)) {
       allowCurrent(phase);
+    }
+    return { sourcePhase, currentRoundOptions, nextRoundOptions, reasons, started, ended, endBoundDone };
+  }
+
+  if (!lifecycle) {
+    for (const phase of Object.values(PLACEMENTS)) {
+      if (phase === PLACEMENTS.PENDING) denyCurrent(phase, "pending-unsafe");
+      else allowCurrent(phase);
     }
     return { sourcePhase, currentRoundOptions, nextRoundOptions, reasons, started, ended, endBoundDone };
   }
@@ -355,8 +364,7 @@ export function evaluatePlacementOptions(state, combatantId, { side = "party" } 
     }
 
     if (phase === PLACEMENTS.PENDING) {
-      if (!started && !ended) allowCurrent(phase);
-      else denyCurrent(phase, "pending-unsafe");
+      denyCurrent(phase, "pending-unsafe");
       continue;
     }
 
@@ -391,11 +399,7 @@ export function evaluatePlacementOptions(state, combatantId, { side = "party" } 
  * Mirrors state.combatantPhase once placements exist.
  */
 export function resolveCombatantPlacement(state, combatantId, side = "party") {
-  const placement = placementForCurrentRound(state, combatantId);
-  if (placement?.phase) return placement.phase;
-  if (side === "enemy") return PLACEMENTS.ENEMY;
-  if (state.delayed?.[combatantId]) return PLACEMENTS.REARGUARD;
-  return resultForCurrentRound(state, combatantId)?.phase ?? PLACEMENTS.REARGUARD;
+  return selectCombatantInitiativeLane(state, combatantId, side);
 }
 
 /**
@@ -431,8 +435,9 @@ export function applyCurrentRoundPlacement(
     // Original ChatMessage is never edited; placement audit retains originalPhase.
     if (next.results) delete next.results[id];
   } else if (targetPhase === PLACEMENTS.REARGUARD) {
-    next.delayed ??= {};
-    next.delayed[id] = true;
+    // A GM correction is not a Delay action. The placement/result is
+    // authoritative without adding delayed-turn semantics.
+    if (next.delayed) delete next.delayed[id];
     const result = resultForCurrentRound(next, id);
     if (result) {
       result.phase = PHASES.REARGUARD;
@@ -621,8 +626,8 @@ export function appendToOpenRoster(state, combatantId, { initiativeTotal = null 
 }
 
 /**
- * Remove unfinished combatant from open roster without running end boundary.
- * Mirrors Delay skip semantics when leaving current phase.
+ * Remove an unfinished combatant from the open roster without settling a turn
+ * boundary. Phase correction is administrative placement, not End/Skip Turn.
  */
 export function leaveOpenRoster(state, combatantId, { userId = null } = {}) {
   const next = cloneState(state);
@@ -636,19 +641,9 @@ export function leaveOpenRoster(state, combatantId, { userId = null } = {}) {
     return { state: next, changed: false, reason: "turn-completed" };
   }
 
-  lifecycle.turns ??= {};
-  lifecycle.turns[id] ??= emptyTurnRecord();
-  const turn = lifecycle.turns[id];
-  turn.ended = true;
-  turn.skipped = true;
-  turn.endedBy = userId == null ? null : String(userId);
-  turn.endedAt = Date.now();
-  turn.endReason = "gm-placement-left-phase";
-  if (turn.endStatus === BOUNDARY_STATUS.PENDING) {
-    turn.endStatus = BOUNDARY_STATUS.SKIPPED;
-  }
-  next.acted ??= {};
-  next.acted[id] = true;
+  lifecycle.roster = lifecycle.roster.filter((combatantIdValue) => combatantIdValue !== id);
+  if (lifecycle.turns) delete lifecycle.turns[id];
+  if (next.acted) delete next.acted[id];
   if (next.activeCombatantId === id) next.activeCombatantId = null;
 
   const progress = lifecycleProgress(lifecycle);
@@ -656,6 +651,7 @@ export function leaveOpenRoster(state, combatantId, { userId = null } = {}) {
     lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
   }
 
+  void userId;
   return { state: next, changed: true, reason: null };
 }
 

@@ -26,6 +26,12 @@ export const BOUNDARY_STATUS = Object.freeze({
   INTERRUPTED: "interrupted",
 });
 
+export const TURN_ADMIN_STATUS = Object.freeze({
+  COMPLETE: "complete",
+  SKIPPED: "skipped",
+  REVIEW: "review",
+});
+
 const PHASES = Object.freeze({
   INITIATIVE: "initiative",
   VANGUARD: "vanguard",
@@ -75,10 +81,16 @@ function emptyTurnRecord() {
     endedAt: null,
     reopenedAt: null,
     skipped: false,
+    reopened: false,
     startStatus: BOUNDARY_STATUS.PENDING,
     endStatus: BOUNDARY_STATUS.PENDING,
     startReason: null,
     endReason: null,
+    startClaimed: false,
+    startProcessed: false,
+    endClaimed: false,
+    endProcessed: false,
+    administrativeStatus: null,
   };
 }
 
@@ -134,16 +146,37 @@ function sanitizeTurn(entry) {
   const endStatus = Object.values(BOUNDARY_STATUS).includes(entry.endStatus)
     ? entry.endStatus
     : BOUNDARY_STATUS.PENDING;
+  const administrativeStatus = Object.values(TURN_ADMIN_STATUS).includes(entry.administrativeStatus)
+    ? entry.administrativeStatus
+    : null;
   return {
     ended: Boolean(entry.ended),
     endedBy: entry.endedBy == null || entry.endedBy === "" ? null : String(entry.endedBy),
     endedAt: Number.isFinite(Number(entry.endedAt)) ? Number(entry.endedAt) : null,
     reopenedAt: Number.isFinite(Number(entry.reopenedAt)) ? Number(entry.reopenedAt) : null,
     skipped: Boolean(entry.skipped),
+    reopened: Boolean(entry.reopened),
     startStatus,
     endStatus,
     startReason: entry.startReason == null ? null : String(entry.startReason).slice(0, 200),
     endReason: entry.endReason == null ? null : String(entry.endReason).slice(0, 200),
+    startClaimed:
+      entry.startClaimed == null
+        ? startStatus !== BOUNDARY_STATUS.PENDING
+        : Boolean(entry.startClaimed),
+    startProcessed:
+      entry.startProcessed == null
+        ? startStatus === BOUNDARY_STATUS.COMPLETED
+        : Boolean(entry.startProcessed),
+    endClaimed:
+      entry.endClaimed == null
+        ? endStatus !== BOUNDARY_STATUS.PENDING
+        : Boolean(entry.endClaimed),
+    endProcessed:
+      entry.endProcessed == null
+        ? endStatus === BOUNDARY_STATUS.COMPLETED && administrativeStatus !== TURN_ADMIN_STATUS.COMPLETE
+        : Boolean(entry.endProcessed),
+    administrativeStatus,
   };
 }
 
@@ -304,16 +337,18 @@ export function getCombatantLifecycleStatus(lifecycle, combatantId) {
   const endStatus = turn?.endStatus ?? BOUNDARY_STATUS.PENDING;
   const startReady =
     startStatus === BOUNDARY_STATUS.COMPLETED || startStatus === BOUNDARY_STATUS.SKIPPED;
-  const turnComplete = endStatus === BOUNDARY_STATUS.COMPLETED;
-  const turnSkipped = endStatus === BOUNDARY_STATUS.SKIPPED || Boolean(turn?.skipped);
+  const reopened = Boolean(turn?.reopened);
+  const turnComplete = !reopened && endStatus === BOUNDARY_STATUS.COMPLETED;
+  const turnSkipped = !reopened && (endStatus === BOUNDARY_STATUS.SKIPPED || Boolean(turn?.skipped));
   const needsReview =
+    turn?.administrativeStatus === TURN_ADMIN_STATUS.REVIEW ||
     startStatus === BOUNDARY_STATUS.FAILED ||
     startStatus === BOUNDARY_STATUS.INTERRUPTED ||
     endStatus === BOUNDARY_STATUS.FAILED ||
     endStatus === BOUNDARY_STATUS.INTERRUPTED ||
     // Legacy 0.3.4-style mark without native end claim.
     Boolean(turn?.ended && !turnComplete && !turnSkipped && endStatus === BOUNDARY_STATUS.PENDING);
-  const resolvedForAdvancement = turnComplete || turnSkipped;
+  const resolvedForAdvancement = !needsReview && (turnComplete || turnSkipped);
   const legacyEndedPending = Boolean(
     turn?.ended && endStatus === BOUNDARY_STATUS.PENDING && !turnSkipped,
   );
@@ -328,6 +363,12 @@ export function getCombatantLifecycleStatus(lifecycle, combatantId) {
     resolvedForAdvancement,
     legacyEndedPending,
     endedFlag: Boolean(turn?.ended || turn?.skipped),
+    reopened,
+    startClaimed: Boolean(turn?.startClaimed),
+    startProcessed: Boolean(turn?.startProcessed),
+    endClaimed: Boolean(turn?.endClaimed),
+    endProcessed: Boolean(turn?.endProcessed),
+    administrativeStatus: turn?.administrativeStatus ?? null,
   };
 }
 
@@ -404,25 +445,34 @@ export function canEndTurn(lifecycle, combatantId) {
   if (!lifecycle.roster?.includes(id)) return false;
   const status = getCombatantLifecycleStatus(lifecycle, id);
   if (status.resolvedForAdvancement) return false;
+  if (status.needsReview) return false;
   if (status.legacyEndedPending) return false;
   if (!status.startReady) return false;
   if (status.endStatus === BOUNDARY_STATUS.PROCESSING) return false;
-  if (status.endedFlag && !status.legacyEndedPending) return false;
+  if ([BOUNDARY_STATUS.FAILED, BOUNDARY_STATUS.INTERRUPTED].includes(status.endStatus)) return false;
+  if (status.endedFlag && !status.legacyEndedPending && !status.reopened) return false;
   return true;
 }
 
 /**
- * Reopen is only for mark-only / pre-native-end turns. Native end completion is irreversible.
+ * Reopen only the NelTempo turn workflow. Settled native/admin boundary claims
+ * are preserved and therefore cannot be replayed by a later close.
  */
 export function canReopenTurn(lifecycle, combatantId) {
-  if (!lifecycle || lifecycle.status !== LIFECYCLE_STATUS.OPEN) return false;
+  if (!lifecycle || ![LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(lifecycle.status)) return false;
   if ([LIFECYCLE_STATUS.ENDING, LIFECYCLE_STATUS.ENDED].includes(lifecycle.status)) return false;
   const id = String(combatantId);
   if (!lifecycle.roster?.includes(id)) return false;
   const status = getCombatantLifecycleStatus(lifecycle, id);
-  if (status.turnComplete || status.turnSkipped) return false;
-  // Allow reopen of legacy mark-only ended (pending end) so GM can recover.
-  return status.legacyEndedPending || (status.endedFlag && !status.resolvedForAdvancement);
+  if (status.reopened || (status.needsReview && !status.legacyEndedPending)) return false;
+  const turn = lifecycle.turns?.[id];
+  if (!turn?.ended && !turn?.skipped) return false;
+  if ([BOUNDARY_STATUS.PROCESSING, BOUNDARY_STATUS.FAILED, BOUNDARY_STATUS.INTERRUPTED].includes(status.endStatus)) {
+    return false;
+  }
+  // Reopen is workflow-only. Completed/skipped claims remain settled, and a
+  // legacy mark-only turn keeps its Pending boundary for an explicit End Turn.
+  return true;
 }
 
 /**
@@ -434,8 +484,8 @@ export function combatantLifecycleUiStatus(lifecycle, combatantId) {
   const id = String(combatantId);
   if (!lifecycle.roster?.includes(id)) return null;
   const status = getCombatantLifecycleStatus(lifecycle, id);
-  if (status.turnSkipped) return "skipped";
   if (status.needsReview) return "review";
+  if (status.turnSkipped) return "skipped";
   if (status.turnComplete) return "ended";
   const turn = lifecycle.turns[id];
   if (
@@ -461,6 +511,16 @@ export function phaseAdvanceReady(lifecycle, { combatantIds = null } = {}) {
   return progress.complete;
 }
 
+function settleAdministrativeStart(lifecycle, turn, id, reason) {
+  if (![BOUNDARY_STATUS.COMPLETED, BOUNDARY_STATUS.SKIPPED].includes(turn.startStatus)) {
+    turn.startStatus = BOUNDARY_STATUS.SKIPPED;
+    turn.startReason = reason;
+    turn.startClaimed = true;
+    turn.startProcessed = false;
+  }
+  lifecycle.start.failedCombatants = (lifecycle.start.failedCombatants ?? []).filter((entry) => entry.id !== id);
+}
+
 /**
  * Mark one combatant skipped without native end processing (explicit GM Mark Skipped).
  */
@@ -468,7 +528,12 @@ export function markTurnSkipped(state, combatantId, { userId = null, at = Date.n
   const next = cloneState(state);
   const lifecycle = next.lifecycle;
   const id = String(combatantId);
-  if (!lifecycle || ![LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(lifecycle.status)) {
+  if (!lifecycle || ![
+    LIFECYCLE_STATUS.OPEN,
+    LIFECYCLE_STATUS.COMPLETE,
+    LIFECYCLE_STATUS.ERROR,
+    LIFECYCLE_STATUS.INTERRUPTED,
+  ].includes(lifecycle.status)) {
     return { state: next, changed: false, reason: "lifecycle-not-open" };
   }
   if (!lifecycle.roster?.includes(id)) {
@@ -483,21 +548,24 @@ export function markTurnSkipped(state, combatantId, { userId = null, at = Date.n
   if (turn.endStatus === BOUNDARY_STATUS.SKIPPED && turn.skipped) {
     return { state: next, changed: false, reason: "already-skipped" };
   }
+  settleAdministrativeStart(lifecycle, turn, id, "gm-mark-skipped-start");
   turn.skipped = true;
   turn.ended = true;
   turn.endedBy = userId == null ? null : String(userId);
   turn.endedAt = Number(at) || Date.now();
   turn.reopenedAt = null;
+  turn.reopened = false;
   turn.endStatus = BOUNDARY_STATUS.SKIPPED;
   turn.endReason = reason;
+  turn.endClaimed = true;
+  turn.endProcessed = false;
+  turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
   lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   next.acted ??= {};
   next.acted[id] = true;
   if (next.activeCombatantId === id) next.activeCombatantId = null;
   const progress = lifecycleProgress(lifecycle);
-  if (progress.complete && lifecycle.status === LIFECYCLE_STATUS.OPEN) {
-    lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
-  }
+  lifecycle.status = progress.complete ? LIFECYCLE_STATUS.COMPLETE : LIFECYCLE_STATUS.OPEN;
   return { state: next, changed: true, reason: null };
 }
 
@@ -516,8 +584,12 @@ export function skipPendingEnds(state, { reason = "advance-without-processing" }
     if (turn.endStatus === BOUNDARY_STATUS.COMPLETED) continue;
     turn.endStatus = BOUNDARY_STATUS.SKIPPED;
     turn.endReason = reason;
+    turn.endClaimed = true;
+    turn.endProcessed = false;
+    turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
     turn.skipped = true;
     turn.ended = true;
+    turn.reopened = false;
     if (!turn.endedAt) turn.endedAt = Date.now();
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
     next.acted ??= {};
@@ -554,6 +626,7 @@ export function markTurnEnded(state, combatantId, { userId = null, at = Date.now
   turn.endedBy = userId == null ? null : String(userId);
   turn.endedAt = Number(at) || Date.now();
   turn.reopenedAt = null;
+  turn.reopened = false;
   next.acted ??= {};
   next.acted[id] = true;
   if (next.activeCombatantId === id) next.activeCombatantId = null;
@@ -580,11 +653,101 @@ export function reopenTurn(state, combatantId, { at = Date.now() } = {}) {
   turn.endedBy = null;
   turn.endedAt = null;
   turn.reopenedAt = Number(at) || Date.now();
+  turn.reopened = true;
   turn.skipped = false;
   if (next.acted) delete next.acted[id];
   if (lifecycle.status === LIFECYCLE_STATUS.COMPLETE) {
     lifecycle.status = LIFECYCLE_STATUS.OPEN;
   }
+  return { state: next, changed: true, reason: null };
+}
+
+/**
+ * Administrative completion: settle the turn without invoking PF2e end-turn.
+ * The claimed-but-unprocessed flags make the distinction inspectable and keep
+ * subsequent End Turn/reopen operations exactly-once safe.
+ */
+export function markTurnCompleteAdministrative(
+  state,
+  combatantId,
+  { userId = null, at = Date.now(), reason = "gm-mark-complete" } = {},
+) {
+  const next = cloneState(state);
+  const lifecycle = next.lifecycle;
+  const id = String(combatantId);
+  if (!lifecycle || ![
+    LIFECYCLE_STATUS.OPEN,
+    LIFECYCLE_STATUS.COMPLETE,
+    LIFECYCLE_STATUS.ERROR,
+    LIFECYCLE_STATUS.INTERRUPTED,
+  ].includes(lifecycle.status)) {
+    return { state: next, changed: false, reason: "lifecycle-not-open" };
+  }
+  if (!lifecycle.roster?.includes(id)) {
+    return { state: next, changed: false, reason: "not-in-roster" };
+  }
+  lifecycle.turns ??= {};
+  lifecycle.turns[id] ??= emptyTurnRecord();
+  const turn = lifecycle.turns[id];
+  if (turn.endStatus === BOUNDARY_STATUS.PROCESSING) {
+    return { state: next, changed: false, reason: "boundary-processing" };
+  }
+  settleAdministrativeStart(lifecycle, turn, id, "gm-mark-complete-start");
+  if (turn.endStatus === BOUNDARY_STATUS.COMPLETED && turn.endProcessed) {
+    if (turn.administrativeStatus !== TURN_ADMIN_STATUS.REVIEW) {
+      return { state: next, changed: false, reason: "already-processed" };
+    }
+    turn.administrativeStatus = null;
+    turn.ended = true;
+    turn.endedBy = userId == null ? turn.endedBy : String(userId);
+    turn.endedAt ??= Number(at) || Date.now();
+    turn.reopened = false;
+    next.acted ??= {};
+    next.acted[id] = true;
+    const restoredProgress = lifecycleProgress(lifecycle);
+    lifecycle.status = restoredProgress.complete ? LIFECYCLE_STATUS.COMPLETE : LIFECYCLE_STATUS.OPEN;
+    return { state: next, changed: true, reason: null };
+  }
+  turn.ended = true;
+  turn.endedBy = userId == null ? null : String(userId);
+  turn.endedAt = Number(at) || Date.now();
+  turn.reopenedAt = null;
+  turn.reopened = false;
+  turn.skipped = false;
+  turn.endStatus = BOUNDARY_STATUS.COMPLETED;
+  turn.endReason = reason;
+  turn.endClaimed = true;
+  turn.endProcessed = false;
+  turn.administrativeStatus = TURN_ADMIN_STATUS.COMPLETE;
+  lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((entry) => entry.id !== id);
+  next.acted ??= {};
+  next.acted[id] = true;
+  if (next.activeCombatantId === id) next.activeCombatantId = null;
+  const progress = lifecycleProgress(lifecycle);
+  lifecycle.status = progress.complete ? LIFECYCLE_STATUS.COMPLETE : LIFECYCLE_STATUS.OPEN;
+  return { state: next, changed: true, reason: null };
+}
+
+/** Administrative review marker. Does not invoke or settle either boundary. */
+export function markTurnReview(state, combatantId, { reason = "gm-mark-review" } = {}) {
+  const next = cloneState(state);
+  const lifecycle = next.lifecycle;
+  const id = String(combatantId);
+  if (!lifecycle || !lifecycle.roster?.includes(id)) {
+    return { state: next, changed: false, reason: "not-in-roster" };
+  }
+  if ([LIFECYCLE_STATUS.PREPARING, LIFECYCLE_STATUS.STARTING, LIFECYCLE_STATUS.ENDING].includes(lifecycle.status)) {
+    return { state: next, changed: false, reason: "lifecycle-busy" };
+  }
+  lifecycle.turns ??= {};
+  lifecycle.turns[id] ??= emptyTurnRecord();
+  const turn = lifecycle.turns[id];
+  if (turn.startStatus === BOUNDARY_STATUS.PROCESSING || turn.endStatus === BOUNDARY_STATUS.PROCESSING) {
+    return { state: next, changed: false, reason: "boundary-processing" };
+  }
+  turn.administrativeStatus = TURN_ADMIN_STATUS.REVIEW;
+  if (turn.endStatus === BOUNDARY_STATUS.PENDING) turn.endReason = reason;
+  if (lifecycle.status === LIFECYCLE_STATUS.COMPLETE) lifecycle.status = LIFECYCLE_STATUS.OPEN;
   return { state: next, changed: true, reason: null };
 }
 
@@ -612,6 +775,10 @@ export function skipRemainingTurns(state, { userId = null, at = Date.now(), reas
     turn.endedAt = Number(at) || Date.now();
     turn.endStatus = BOUNDARY_STATUS.SKIPPED;
     turn.endReason = reason;
+    turn.endClaimed = true;
+    turn.endProcessed = false;
+    turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+    turn.reopened = false;
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
     next.acted ??= {};
     next.acted[id] = true;
@@ -652,6 +819,8 @@ export function markCombatantStartProcessing(state, combatantId) {
   if (next.lifecycle.turns[id].startStatus === BOUNDARY_STATUS.COMPLETED) return next;
   next.lifecycle.turns[id].startStatus = BOUNDARY_STATUS.PROCESSING;
   next.lifecycle.turns[id].startReason = null;
+  next.lifecycle.turns[id].startClaimed = true;
+  next.lifecycle.turns[id].startProcessed = false;
   return next;
 }
 
@@ -666,14 +835,21 @@ export function markCombatantStartResult(state, combatantId, { ok, reason = null
   if (skipped) {
     turn.startStatus = BOUNDARY_STATUS.SKIPPED;
     turn.startReason = reason;
+    turn.startClaimed = true;
+    turn.startProcessed = false;
   } else if (ok) {
     turn.startStatus = BOUNDARY_STATUS.COMPLETED;
     turn.startReason = null;
+    turn.startClaimed = true;
+    turn.startProcessed = true;
+    if (turn.administrativeStatus === TURN_ADMIN_STATUS.REVIEW) turn.administrativeStatus = null;
     lifecycle.start.processedCombatants = uniquePush(lifecycle.start.processedCombatants, id);
     lifecycle.start.failedCombatants = (lifecycle.start.failedCombatants ?? []).filter((e) => e.id !== id);
   } else {
     turn.startStatus = BOUNDARY_STATUS.FAILED;
     turn.startReason = reason || "start-failed";
+    turn.startClaimed = true;
+    turn.startProcessed = false;
     lifecycle.start.failedCombatants = [
       ...(lifecycle.start.failedCombatants ?? []).filter((e) => e.id !== id),
       { id, reason: turn.startReason },
@@ -719,6 +895,8 @@ export function markCombatantEndProcessing(state, combatantId) {
   if (next.lifecycle.turns[id].endStatus === BOUNDARY_STATUS.COMPLETED) return next;
   next.lifecycle.turns[id].endStatus = BOUNDARY_STATUS.PROCESSING;
   next.lifecycle.turns[id].endReason = null;
+  next.lifecycle.turns[id].endClaimed = true;
+  next.lifecycle.turns[id].endProcessed = false;
   return next;
 }
 
@@ -733,14 +911,22 @@ export function markCombatantEndResult(state, combatantId, { ok, reason = null, 
   if (skipped) {
     turn.endStatus = BOUNDARY_STATUS.SKIPPED;
     turn.endReason = reason;
+    turn.endClaimed = true;
+    turn.endProcessed = false;
+    turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
   } else if (ok) {
     turn.endStatus = BOUNDARY_STATUS.COMPLETED;
     turn.endReason = null;
+    turn.endClaimed = true;
+    turn.endProcessed = true;
+    turn.administrativeStatus = null;
     lifecycle.end.processedCombatants = uniquePush(lifecycle.end.processedCombatants, id);
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   } else {
     turn.endStatus = BOUNDARY_STATUS.FAILED;
     turn.endReason = reason || "end-failed";
+    turn.endClaimed = true;
+    turn.endProcessed = false;
     lifecycle.end.failedCombatants = [
       ...(lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id),
       { id, reason: turn.endReason },
@@ -792,6 +978,78 @@ export function endCandidates(lifecycle, { onlyFailedOrInterrupted = false } = {
   });
 }
 
+const SAFE_START_RETRY_REASONS = new Set([
+  "missing-combatant",
+  "missing-actor",
+  "unsupported-system",
+  "no-native-start-method",
+]);
+const SAFE_END_RETRY_REASONS = new Set([
+  "missing-combatant",
+  "missing-actor",
+  "unsupported-system",
+  "no-native-end-method",
+]);
+
+/** Retry is only safe when the adapter failed before invoking a native method. */
+export function canRetryStartBoundary(lifecycle, combatantId) {
+  const turn = lifecycle?.turns?.[String(combatantId)];
+  return Boolean(
+    turn &&
+    turn.startStatus === BOUNDARY_STATUS.FAILED &&
+    !turn.startProcessed &&
+    SAFE_START_RETRY_REASONS.has(String(turn.startReason ?? "")),
+  );
+}
+
+/** Retry is only safe when the adapter failed before invoking a native method. */
+export function canRetryEndBoundary(lifecycle, combatantId) {
+  const turn = lifecycle?.turns?.[String(combatantId)];
+  return Boolean(
+    turn &&
+    turn.endStatus === BOUNDARY_STATUS.FAILED &&
+    !turn.endProcessed &&
+    SAFE_END_RETRY_REASONS.has(String(turn.endReason ?? "")),
+  );
+}
+
+export function retryableStartCandidates(lifecycle) {
+  return (lifecycle?.roster ?? []).filter((id) => canRetryStartBoundary(lifecycle, id));
+}
+
+export function retryableEndCandidates(lifecycle) {
+  return (lifecycle?.roster ?? []).filter((id) => canRetryEndBoundary(lifecycle, id));
+}
+
+/** Lightweight, serializable lifecycle inspector model for one combatant. */
+export function buildLifecycleInspection(lifecycle, combatantId) {
+  const id = String(combatantId);
+  const turn = lifecycle?.turns?.[id] ?? null;
+  const status = getCombatantLifecycleStatus(lifecycle, id);
+  const boundary = (kind) => {
+    const value = turn?.[`${kind}Status`] ?? BOUNDARY_STATUS.PENDING;
+    return {
+      status: value,
+      claimed: Boolean(turn?.[`${kind}Claimed`]),
+      processed: Boolean(turn?.[`${kind}Processed`]),
+      completed: value === BOUNDARY_STATUS.COMPLETED,
+      reason: turn?.[`${kind}Reason`] ?? null,
+    };
+  };
+  return {
+    combatantId: id,
+    phase: lifecycle?.phase ?? null,
+    round: Number(lifecycle?.round ?? 0) || 0,
+    phaseInstanceId: lifecycle?.phaseInstanceId ?? null,
+    lifecycleStatus: lifecycle?.status ?? null,
+    turnStatus: combatantLifecycleUiStatus(lifecycle, id),
+    reopened: status.reopened,
+    administrativeStatus: status.administrativeStatus,
+    start: boundary("start"),
+    end: boundary("end"),
+  };
+}
+
 export function skipFailedStarts(state, combatantIds = null) {
   const next = cloneState(state);
   const lifecycle = next.lifecycle;
@@ -803,6 +1061,8 @@ export function skipFailedStarts(state, combatantIds = null) {
     if (turn.startStatus === BOUNDARY_STATUS.COMPLETED) continue;
     turn.startStatus = BOUNDARY_STATUS.SKIPPED;
     turn.startReason = turn.startReason || "skipped-by-gm";
+    turn.startClaimed = true;
+    turn.startProcessed = false;
     lifecycle.start.failedCombatants = (lifecycle.start.failedCombatants ?? []).filter((e) => e.id !== id);
   }
   return next;
@@ -819,6 +1079,9 @@ export function skipFailedEnds(state, combatantIds = null) {
     if (turn.endStatus === BOUNDARY_STATUS.COMPLETED) continue;
     turn.endStatus = BOUNDARY_STATUS.SKIPPED;
     turn.endReason = turn.endReason || "skipped-by-gm";
+    turn.endClaimed = true;
+    turn.endProcessed = false;
+    turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   }
   return next;

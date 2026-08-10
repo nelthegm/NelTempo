@@ -211,7 +211,11 @@ composed = markCombatantEndResult(composed, "ownerPc", { ok: true });
 const composedEnded = markTurnEnded(composed, "ownerPc", { userId: "user1" });
 assert.equal(composedEnded.state.lifecycle.turns.ownerPc.endStatus, BOUNDARY_STATUS.COMPLETED);
 assert.equal(composedEnded.state.lifecycle.turns.ownerPc.ended, true);
-assert.equal(canReopenTurn(composedEnded.state.lifecycle, "ownerPc"), false);
+assert.equal(canReopenTurn(composedEnded.state.lifecycle, "ownerPc"), true);
+const processedReopen = reopenTurn(composedEnded.state, "ownerPc");
+assert.equal(processedReopen.changed, true);
+assert.equal(processedReopen.state.lifecycle.turns.ownerPc.endStatus, BOUNDARY_STATUS.COMPLETED);
+assert.equal(processedReopen.state.lifecycle.turns.ownerPc.endProcessed, true);
 assert.equal(phaseAdvanceReady(composedEnded.state.lifecycle), false);
 
 // Not in roster rejected
@@ -490,7 +494,7 @@ assert.equal(REQUESTS.END_REMAINING, "end-remaining");
 
 // Module version
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.3.6");
+assert.equal(moduleJson.version, "0.4.0");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 
 // Localization keys exist
@@ -505,7 +509,7 @@ assert.ok(lang["NDI.Placement.Edit"]);
 // Schema default includes lifecycle null
 const fresh = createState();
 assert.equal(fresh.lifecycle, null);
-assert.equal(fresh.schema, 6);
+assert.equal(fresh.schema, 7);
 
 // attachLifecycle helper
 const attached = attachLifecycle(fresh, createLifecycle({ phase: PHASES.ENEMY, round: 1, roster: [] }));
