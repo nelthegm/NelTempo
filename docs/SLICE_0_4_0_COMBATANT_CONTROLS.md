@@ -33,4 +33,8 @@ Retry is available only for adapter failures known to happen before native invoc
 
 ## Lifecycle inspector
 
-The inspector reports current phase/lane/result, round, primary-GM authority, turn state, and claimed/processed/completed/status/reason for each boundary.
+The inspector reports current phase/lane/result, round, primary-GM authority, turn state, and claimed/processed/completed/status/reason for each boundary. For an intentional Delay it also reports Delayed, the original Vanguard Start, the durable actual-turn id, and Rearguard as the resume lane.
+
+## Delayed-turn repair
+
+Delay is a transfer of the remainder of the already-started Vanguard turn, not an End Turn or administrative move. The Vanguard lifecycle drops the actor from its remaining roster while a schema-8 snapshot preserves the completed Start and pending End. Rearguard hydrates that snapshot, skips duplicate Start processing, and keeps the actor incomplete/actionable until End Turn, Complete, Skipped, or Review resolves it. Guard-Off force advancement uses administrative skip semantics and never invokes native End merely to change phases.

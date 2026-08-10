@@ -432,7 +432,7 @@ assert.ok(Object.keys(update)[0].includes(MODULE_ID));
 let delayState = createState({ round: 1, enemyDC: 10 });
 delayState = submitResult(delayState, "pc1", { total: 30, skill: "perception" });
 delayState = delayToRearguard(delayState, "pc1");
-assert.equal(delayState.delayed.pc1, true);
+assert.equal(delayState.delayed.pc1.workflowStatus, "review");
 assert.equal(delayState.results.pc1.phase, PHASES.REARGUARD);
 
 // --- Adapter: unsupported without game ---
@@ -509,7 +509,7 @@ assert.ok(lang["NDI.Placement.Edit"]);
 // Schema default includes lifecycle null
 const fresh = createState();
 assert.equal(fresh.lifecycle, null);
-assert.equal(fresh.schema, 7);
+assert.equal(fresh.schema, 8);
 
 // attachLifecycle helper
 const attached = attachLifecycle(fresh, createLifecycle({ phase: PHASES.ENEMY, round: 1, roster: [] }));

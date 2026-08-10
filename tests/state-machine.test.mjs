@@ -29,7 +29,7 @@ assert.equal(nextPhase(PHASES.REARGUARD), PHASES.INITIATIVE);
 
 let state = createState({ round: 1, enemyDC: 30 });
 assert.equal(state.revision, 0);
-assert.equal(state.schema, 7);
+assert.equal(state.schema, 8);
 
 state = submitResult(state, "pc1", { total: 31, skill: "perception" });
 state = submitResult(state, "pc2", { total: 29, skill: "stealth" });
@@ -43,7 +43,7 @@ state = reclassifyResults(state);
 assert.equal(state.results.pc1.phase, PHASES.REARGUARD);
 
 state = delayToRearguard(state, "pc1");
-assert.equal(state.delayed.pc1, true);
+assert.equal(state.delayed.pc1.workflowStatus, "review");
 
 const transition = beginRoundTransition(state);
 assert.equal(transition.round, 2);

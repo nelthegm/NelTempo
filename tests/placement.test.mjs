@@ -59,7 +59,7 @@ assert.equal(REQUESTS.PLACEMENT_QUEUE, "placement-queue");
 assert.equal(REQUESTS.PLACEMENT_CANCEL_QUEUE, "placement-cancel-queue");
 
 const fresh = createState();
-assert.equal(fresh.schema, 7);
+assert.equal(fresh.schema, 8);
 assert.deepEqual(fresh.placements, {});
 assert.deepEqual(fresh.placementCorrections, {});
 assert.deepEqual(fresh.placementAudit, []);

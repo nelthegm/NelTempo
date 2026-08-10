@@ -8,7 +8,6 @@ import {
   PHASES,
   beginRoundTransition,
   createState,
-  delayToRearguard,
   markActed,
   normalizeUndoRestore,
   reclassifyResults,
@@ -32,6 +31,7 @@ import {
   completeEndBoundary,
   completeStartBoundary,
   createLifecycle,
+  delayActiveTurnToRearguard,
   endCandidates,
   isLifecyclePhase,
   lifecycleProgress,
@@ -54,6 +54,9 @@ import {
   startCandidates,
   undoCrossesPhaseEnd,
   getCombatantLifecycleStatus,
+  hydrateDelayedTurns,
+  skipUnresolvedDelayedTurns,
+  unresolvedDelayedTurnIds,
 } from "./lifecycle.js";
 import {
   emitCombatantTurnEnded,
@@ -675,6 +678,9 @@ async function enterLifecyclePhase(combat, state, targetPhase) {
   });
   next.lifecycle = lifecycle;
   next.lifecycle.status = LIFECYCLE_STATUS.PREPARING;
+  if (targetPhase === PHASES.REARGUARD) {
+    next = hydrateDelayedTurns(next);
+  }
 
   await clearNativeTurn(combat);
   await persistState(combat, next, "phase-lifecycle-created");
@@ -703,6 +709,25 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
       let next = state;
       const processRemaining = Boolean(options.processRemaining);
       const force = Boolean(options.force);
+
+      // A delayed current-round turn must be represented in Rearguard's
+      // lifecycle before round advance. Corrupt/orphaned snapshots fail closed;
+      // Guard Off may settle them only through the existing safe-skip policy.
+      if (state.phase === PHASES.REARGUARD && targetPhase === PHASES.INITIATIVE) {
+        const unresolved = unresolvedDelayedTurnIds(state);
+        const roster = new Set(state.lifecycle?.roster ?? []);
+        const orphaned = unresolved.filter((id) => !roster.has(id));
+        if (orphaned.length > 0 && shouldGuardIncompletePhase() && !force) {
+          lifecycleDiag("round-advance-delayed-review", combat, state, {
+            combatants: orphaned.map(shortId).join(","),
+          });
+          notify("warn", localize("NDI.Lifecycle.DelayedReviewRequired"));
+          return state;
+        }
+        if (orphaned.length > 0 && (!shouldGuardIncompletePhase() || force)) {
+          next = skipUnresolvedDelayedTurns(next).state;
+        }
+      }
 
       // Leaving a lifecycle phase: individual End Turn owns native end.
       // Phase leave only finalizes bookkeeping unless Process Remaining / skip is requested.
@@ -1468,8 +1493,26 @@ async function delayCombatant(combat, state, payload, requestUser) {
     });
   }
 
-  // Delay removes them from Vanguard play; mark ended/skipped in lifecycle so phase can complete.
-  let next = delayToRearguard(liveState, combatant.id);
+  // Delay transfers the same open turn to Rearguard. It deliberately does not
+  // claim End, mark acted, or emit/native-process any end-turn boundary.
+  const delayed = delayActiveTurnToRearguard(
+    withHistory(liveState, `Delay ${combatant.id} to rearguard`),
+    combatant.id,
+    {
+      userId: requestUser.id,
+      expectedRound: payload.expectedRound,
+      expectedPhaseInstanceId: payload.expectedPhaseInstanceId,
+    },
+  );
+  if (!delayed.changed) {
+    if (delayed.review) await persistState(combat, delayed.state, "delay-review");
+    lifecycleDiag("delay-rejected", combat, delayed.state, {
+      combatantId: shortId(combatant.id),
+      reason: delayed.reason,
+    });
+    throw new Error(localize("NDI.Error.DelayUnavailable"));
+  }
+  let next = delayed.state;
   if (next.lifecycle?.timing) {
     next.lifecycle.timing = pushTimingAudit(next.lifecycle.timing, "delay-allowed", {
       combatantId: shortId(combatant.id),
@@ -1477,31 +1520,11 @@ async function delayCombatant(combat, state, payload, requestUser) {
       reason: isGmMove ? "gm-move" : "voluntary",
     });
   }
-  if (next.lifecycle?.roster?.includes(combatant.id)) {
-    const turn = next.lifecycle.turns?.[combatant.id];
-    if (turn && !turn.ended) {
-      turn.ended = true;
-      turn.skipped = true;
-      turn.endedBy = requestUser.id;
-      turn.endedAt = Date.now();
-      turn.endReason = "delayed-to-rearguard";
-      // Delayed combatants leave this phase; skip end-of-phase processing for them
-      // so end-turn runs in Rearguard instead (native once-per-phase model).
-      if (turn.endStatus === BOUNDARY_STATUS.PENDING) {
-        turn.endStatus = BOUNDARY_STATUS.SKIPPED;
-      }
-    }
-    next.acted ??= {};
-    next.acted[combatant.id] = true;
-    const progress = lifecycleProgress(next.lifecycle, { combatantIds: combatantIdList(combat) });
-    if (progress.complete && next.lifecycle.status === LIFECYCLE_STATUS.OPEN) {
-      next.lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
-    }
-    // Remove delayed combatant from Confused priority gate.
-    if (next.lifecycle.timing) {
-      next.lifecycle.timing = markPriorityResolved(next.lifecycle.timing, combatant.id);
-      next.lifecycle.timing = recomputePriorityGate(next.lifecycle.timing, next.lifecycle);
-    }
+  // Remove the transferred actor from the Vanguard priority gate. The turn
+  // itself remains pending in the delayed snapshot until Rearguard resolves it.
+  if (next.lifecycle?.timing) {
+    next.lifecycle.timing = markPriorityResolved(next.lifecycle.timing, combatant.id);
+    next.lifecycle.timing = recomputePriorityGate(next.lifecycle.timing, next.lifecycle);
   }
   await persistState(combat, next, "delay-rearguard");
   await clearNativeTurn(combat);

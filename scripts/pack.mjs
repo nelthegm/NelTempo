@@ -17,9 +17,11 @@ const INCLUDE = [
   "README.md",
   "LICENSE",
   "CHANGELOG.md",
+  "RELEASE_NOTES.md",
   "FORGE_INSTALL.md",
   "PLAYTEST_CHECKLIST.md",
   "scripts/constants.js",
+  "scripts/confirmation.js",
   "scripts/controller.js",
   "scripts/initiative.js",
   "scripts/initiative-lane.js",
@@ -54,6 +56,7 @@ const INCLUDE = [
   "docs/SLICE_0_3_6_TURN_COMPLETION.md",
   "docs/SLICE_0_4_0_COMBATANT_CONTROLS.md",
   "docs/SLICE_0_4_0_TEST_PLAN.md",
+  "docs/NELTEMPO_0.4.0_TEST_PLAN.md",
 ];
 
 function ensureIncludes() {

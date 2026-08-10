@@ -185,6 +185,12 @@ body.ndi-suppress-native-tracker .combat-tracker {
   border-color: rgba(52, 200, 193, 0.7);
 }
 
+.ndi-lifecycle-pip.is-delayed {
+  color: #f0d48a;
+  border-color: rgba(240, 212, 138, 0.8);
+  background: rgba(52, 39, 18, 0.9);
+}
+
 .ndi-lifecycle-pip.is-start-pending,
 .ndi-lifecycle-pip.is-starting {
   color: #f0d48a;

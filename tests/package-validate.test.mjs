@@ -10,6 +10,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 for (const file of [
   "scripts/main.js",
   "scripts/controller.js",
+  "scripts/confirmation.js",
   "scripts/state.js",
   "scripts/utils.js",
   "scripts/ui.js",
@@ -71,10 +72,15 @@ if (existsSync(zipPath)) {
   assert.ok(entries.some((e) => e.startsWith("lang/")), "ZIP includes lang/");
   assert.ok(entries.includes("README.md"), "ZIP includes README.md");
   assert.ok(entries.includes("LICENSE"), "ZIP includes LICENSE");
+  assert.ok(entries.includes("scripts/confirmation.js"), "ZIP includes confirmation helper");
+  assert.ok(entries.includes("RELEASE_NOTES.md"), "ZIP includes release notes");
+  assert.ok(entries.includes("docs/NELTEMPO_0.4.0_TEST_PLAN.md"), "ZIP includes 0.4.0 runtime plan");
   assert.equal(entries.some((e) => e.startsWith(".git")), false);
   assert.equal(entries.some((e) => e.startsWith("tests/")), false);
   assert.equal(entries.some((e) => e.startsWith("node_modules/")), false);
   assert.equal(entries.some((e) => e.startsWith("dist/")), false);
+  assert.equal(entries.some((e) => /(^|\/)(\.cache|cache|caches|credentials?)(\/|$)/i.test(e)), false);
+  assert.equal(entries.some((e) => /(^|\/)(\.env|credentials?\.json|secrets?\.json)$/i.test(e)), false);
 
   const size = statSync(zipPath).size;
   assert.ok(size > 100, "ZIP should not be empty");
@@ -86,5 +92,11 @@ if (existsSync(zipPath)) {
 // package.json test script exists
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 assert.ok(pkg.scripts?.test);
+assert.ok(pkg.scripts?.check);
+const manifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
+assert.equal(manifest.id, "nel-dynamic-initiative");
+assert.equal(manifest.title, "NelTempo");
+assert.equal(manifest.version, "0.4.0");
+assert.match(manifest.download, /\/v0\.4\.0-rc1\/dynamic-initiative\.zip$/);
 
 console.log("Dynamic Initiative package-validate tests passed.");

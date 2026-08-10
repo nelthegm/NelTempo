@@ -9,6 +9,10 @@
 - Reopens turn workflow without undoing PF2e mechanics or allowing an already-settled boundary to replay.
 - Exposes Retry only for adapter failures known to occur before native PF2e invocation; ambiguous throws/interruption remain Review.
 - Separates initiative/phase correction from Start Turn, End Turn, and Mark Skipped actions.
+- Delaying to Rearguard now preserves the current open turn instead of treating the combatant as already finished.
+- A delayed combatant resumes the same turn in Rearguard without duplicate PF2e Start Turn processing.
+- Delaying does not invoke PF2e End Turn.
+- Repaired phase/recovery confirmation paths that could fail on an undefined dialog helper.
 
 ## 0.3.6
 

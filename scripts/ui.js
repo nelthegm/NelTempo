@@ -1,4 +1,5 @@
 import { MODULE_ID, PHASE_BAR_LAYOUTS, REQUESTS, SETTINGS } from "./constants.js";
+import { chooseNelTempoAction, confirmNelTempoAction } from "./confirmation.js";
 import { getCombatantControlsProjection, getPlacementEditorProjection, requestAction } from "./controller.js";
 import { formatCountdownDisplay, sanitizeCountdown } from "./countdown.js";
 import { rollDynamicInitiative } from "./initiative.js";
@@ -913,27 +914,11 @@ function enableDrag(root) {
 
 
 async function confirmEndCombat() {
-  const DialogV2 = foundry?.applications?.api?.DialogV2;
-  if (DialogV2?.confirm) {
-    return DialogV2.confirm({
-      window: { title: t("NDI.Title") },
-      content: `<p>${escapeHTML(t("NDI.Control.End"))}?</p>`,
-      yes: { default: true },
-    });
-  }
-  return window.confirm("End this combat encounter?");
-}
-
-async function confirmDialog(title, content) {
-  const DialogV2 = foundry?.applications?.api?.DialogV2;
-  if (DialogV2?.confirm) {
-    return DialogV2.confirm({
-      window: { title },
-      content: `<p>${escapeHTML(content)}</p>`,
-      yes: { default: true },
-    });
-  }
-  return window.confirm(`${title}\n\n${content}`);
+  return confirmNelTempoAction({
+    title: t("NDI.Title"),
+    content: `${t("NDI.Control.End")}?`,
+    diagnostic: "end-combat",
+  });
 }
 
 function lifecycleStatusPip(combatant, state) {
@@ -943,6 +928,7 @@ function lifecycleStatusPip(combatant, state) {
     "start-pending": { icon: "fa-clock", tip: "NDI.Lifecycle.Status.StartPending", cls: "is-start-pending" },
     starting: { icon: "fa-spinner", tip: "NDI.Lifecycle.Status.Starting", cls: "is-starting" },
     ready: { icon: "fa-play", tip: "NDI.Lifecycle.Status.Ready", cls: "is-ready" },
+    delayed: { icon: "fa-hourglass-half", tip: "NDI.Lifecycle.Status.Delayed", cls: "is-delayed" },
     ended: { icon: "fa-check", tip: "NDI.Lifecycle.Status.Ended", cls: "is-ended-pip" },
     review: { icon: "fa-triangle-exclamation", tip: "NDI.Lifecycle.Status.Review", cls: "is-review" },
     skipped: { icon: "fa-forward", tip: "NDI.Lifecycle.Status.Skipped", cls: "is-skipped" },
@@ -979,41 +965,32 @@ async function incompletePhaseGuardDialog(combat, state) {
     <p>${escapeHTML(t("NDI.Lifecycle.IncompleteTurnsList"))}</p>
     <ul>${list || `<li>${escapeHTML(t("NDI.Lifecycle.IncompleteUnknown"))}</li>`}</ul>`;
 
-  const DialogV2 = foundry?.applications?.api?.DialogV2;
-  try {
-    if (DialogV2?.wait) {
-      const result = await DialogV2.wait({
-        window: { title: t("NDI.Lifecycle.CannotAdvanceTitle") },
-        content,
-        buttons: [
-          {
-            action: "return",
-            label: t("NDI.Lifecycle.ReturnToPhase"),
-            default: true,
-          },
-          {
-            action: "process",
-            label: t("NDI.Lifecycle.ProcessAndEndRemaining"),
-          },
-          {
-            action: "skip",
-            label: t("NDI.Lifecycle.AdvanceWithoutProcessing"),
-          },
-        ],
-        rejectClose: false,
-      });
-      if (result === "process" || result === "skip" || result === "return") return result;
-      return "return";
-    }
-  } catch (error) {
-    console.error(`${MODULE_ID} | phase-advance dialog failed`, error);
-  }
-
-  // Safe fallback: Cancel or Advance Without Processing — never trap the GM.
-  const force = window.confirm(
-    `${t("NDI.Lifecycle.CannotAdvancePhase")}\n\n${names.join(", ")}\n\n${t("NDI.Lifecycle.DialogFallbackForce")}`,
-  );
-  return force ? "skip" : "return";
+  return chooseNelTempoAction({
+    title: t("NDI.Lifecycle.CannotAdvanceTitle"),
+    content,
+    buttons: [
+      {
+        action: "return",
+        label: t("NDI.Lifecycle.ReturnToPhase"),
+        default: true,
+      },
+      {
+        action: "process",
+        label: t("NDI.Lifecycle.ProcessAndEndRemaining"),
+      },
+      {
+        action: "skip",
+        label: t("NDI.Lifecycle.AdvanceWithoutProcessing"),
+      },
+    ],
+    defaultAction: "return",
+    fallback: {
+      message: `${t("NDI.Lifecycle.CannotAdvancePhase")}\n\n${names.join(", ")}\n\n${t("NDI.Lifecycle.DialogFallbackForce")}`,
+      confirmedAction: "skip",
+      cancelledAction: "return",
+    },
+    diagnostic: "phase-advance",
+  });
 }
 
 function placementReasonText(reason) {
@@ -1074,7 +1051,9 @@ async function openLifecycleInspector(combatantId) {
     ?.sort?.((a, b) => String(a.id).localeCompare(String(b.id)))?.[0];
   const turnStatus = state.activeCombatantId === combatantId
     ? t("NDI.Inspector.TakingTurn")
-    : life?.turnStatus ?? t("NDI.Inspector.NotInLifecycle");
+    : life?.delayed
+      ? t("NDI.Lifecycle.Status.Delayed")
+      : life?.turnStatus ?? t("NDI.Inspector.NotInLifecycle");
   const boundaryRows = (label, boundary) => boundary
     ? `<section class="ndi-inspector-section">
         <h3>${escapeHTML(label)}</h3>
@@ -1094,6 +1073,8 @@ async function openLifecycleInspector(combatantId) {
       <dt>${escapeHTML(t("NDI.Inspector.CurrentResult"))}</dt><dd>${escapeHTML(currentResult)}</dd>
       <dt>${escapeHTML(t("NDI.Inspector.Lane"))}</dt><dd>${escapeHTML(placementPhaseLabel(projection.lane))}</dd>
       <dt>${escapeHTML(t("NDI.Inspector.TurnStatus"))}</dt><dd>${escapeHTML(turnStatus)}</dd>
+      ${life?.originalPhase ? `<dt>${escapeHTML(t("NDI.Inspector.OriginalPhase"))}</dt><dd>${escapeHTML(phaseLabel(life.originalPhase))}</dd>` : ""}
+      ${life?.resumePhase ? `<dt>${escapeHTML(t("NDI.Inspector.ResumeLane"))}</dt><dd>${escapeHTML(phaseLabel(life.resumePhase))}</dd>` : ""}
       <dt>${escapeHTML(t("NDI.Inspector.Round"))}</dt><dd>${escapeHTML(String(state.round))}</dd>
       <dt>${escapeHTML(t("NDI.Inspector.Authority"))}</dt><dd>${escapeHTML(primaryGM?.name ?? t("NDI.Inspector.NoPrimaryGM"))}</dd>
       ${life?.administrativeStatus ? `<dt>${escapeHTML(t("NDI.Inspector.Administrative"))}</dt><dd>${escapeHTML(life.administrativeStatus)}</dd>` : ""}
@@ -1175,9 +1156,10 @@ async function openCombatantControls(combatantId) {
             await openPlacementEditor(combatantId);
             return;
           }
-          if (action === "reopen" && !await confirmDialog(t("NDI.Control.ReopenTurn"), t("NDI.Controls.ReopenWarning"))) return;
-          if (action === "mark-complete" && !await confirmDialog(t("NDI.Control.MarkComplete"), t("NDI.Controls.MarkCompleteHint"))) return;
-          if (action === "mark-skipped" && !await confirmDialog(t("NDI.Control.MarkSkipped"), t("NDI.Controls.MarkSkippedHint"))) return;
+          if (action === "reopen" && !await confirmNelTempoAction({ title: t("NDI.Control.ReopenTurn"), content: t("NDI.Controls.ReopenWarning"), diagnostic: "reopen-turn" })) return;
+          if (action === "retry-end" && !await confirmNelTempoAction({ title: t("NDI.Controls.RetryEnd"), content: t("NDI.Controls.RetrySafeHint"), diagnostic: "retry-end" })) return;
+          if (action === "mark-complete" && !await confirmNelTempoAction({ title: t("NDI.Control.MarkComplete"), content: t("NDI.Controls.MarkCompleteHint"), diagnostic: "mark-complete" })) return;
+          if (action === "mark-skipped" && !await confirmNelTempoAction({ title: t("NDI.Control.MarkSkipped"), content: t("NDI.Controls.MarkSkippedHint"), diagnostic: "mark-skipped" })) return;
           dialog.close?.();
           const requests = {
             "process-start": REQUESTS.START_TURN_NOW,
@@ -1275,10 +1257,11 @@ async function openPlacementEditor(combatantId) {
           const phase = button.dataset.placementPhase;
           let replace = false;
           if (mode === PLACEMENT_MODES.NEXT_ROUND && projection.queued) {
-            replace = await confirmDialog(
-              t("NDI.Placement.ReplaceQueued"),
-              t("NDI.Placement.ReplaceQueuedConfirm"),
-            );
+            replace = await confirmNelTempoAction({
+              title: t("NDI.Placement.ReplaceQueued"),
+              content: t("NDI.Placement.ReplaceQueuedConfirm"),
+              diagnostic: "replace-placement",
+            });
             if (!replace) return;
           }
           dialog.close?.();
@@ -1444,40 +1427,58 @@ function bindDockEvents(root, combat, state) {
         const progress = state.lifecycle
           ? lifecycleProgress(state.lifecycle, { combatantIds: [...combat.combatants].map((c) => c.id) })
           : { remaining: [] };
-        const ok = await confirmDialog(
-          t("NDI.Control.ForceAdvance"),
-          t("NDI.Lifecycle.ForceAdvanceConfirm", { count: progress.remaining?.length ?? 0 }),
-        );
+        const ok = await confirmNelTempoAction({
+          title: t("NDI.Control.ForceAdvance"),
+          content: t("NDI.Lifecycle.ForceAdvanceConfirm", { count: progress.remaining?.length ?? 0 }),
+          diagnostic: "force-advance",
+        });
         if (ok) await requestAction(REQUESTS.FORCE_ADVANCE);
         break;
       }
       case "end-remaining": {
-        const ok = await confirmDialog(
-          t("NDI.Control.EndRemaining"),
-          t("NDI.Lifecycle.EndRemainingConfirm"),
-        );
+        const ok = await confirmNelTempoAction({
+          title: t("NDI.Control.EndRemaining"),
+          content: t("NDI.Lifecycle.EndRemainingConfirm"),
+          diagnostic: "end-remaining",
+        });
         if (ok) await requestAction(REQUESTS.END_REMAINING);
         break;
       }
-      case "retry-failed-start":
-        await requestAction(REQUESTS.RETRY_FAILED_START);
+      case "retry-failed-start": {
+        const ok = await confirmNelTempoAction({ title: t("NDI.Control.RetryFailedStart"), content: t("NDI.Controls.RetrySafeHint"), diagnostic: "retry-failed-start" });
+        if (ok) await requestAction(REQUESTS.RETRY_FAILED_START);
         break;
-      case "skip-failed-start":
-        await requestAction(REQUESTS.SKIP_FAILED_START);
+      }
+      case "skip-failed-start": {
+        const ok = await confirmNelTempoAction({ title: t("NDI.Control.SkipFailedStart"), content: t("NDI.Controls.MarkSkippedHint"), diagnostic: "skip-failed-start" });
+        if (ok) await requestAction(REQUESTS.SKIP_FAILED_START);
         break;
-      case "retry-failed-end":
-        await requestAction(REQUESTS.RETRY_FAILED_END);
+      }
+      case "retry-failed-end": {
+        const ok = await confirmNelTempoAction({ title: t("NDI.Control.RetryFailedEnd"), content: t("NDI.Controls.RetrySafeHint"), diagnostic: "retry-failed-end" });
+        if (ok) await requestAction(REQUESTS.RETRY_FAILED_END);
         break;
-      case "skip-failed-end":
-        await requestAction(REQUESTS.SKIP_FAILED_END);
+      }
+      case "skip-failed-end": {
+        const ok = await confirmNelTempoAction({ title: t("NDI.Control.SkipFailedEnd"), content: t("NDI.Controls.MarkSkippedHint"), diagnostic: "skip-failed-end" });
+        if (ok) await requestAction(REQUESTS.SKIP_FAILED_END);
         break;
+      }
       case "move-active-rearguard":
-        await requestAction(REQUESTS.MOVE_REARGUARD, { combatantId: state.activeCombatantId });
+        await requestAction(REQUESTS.MOVE_REARGUARD, {
+          combatantId: state.activeCombatantId,
+          expectedRound: state.round,
+          expectedPhaseInstanceId: state.lifecycle?.phaseInstanceId,
+        });
         break;
       case "delay":
         if (target.disabled) break;
         event.stopPropagation();
-        await requestAction(REQUESTS.DELAY, { combatantId });
+        await requestAction(REQUESTS.DELAY, {
+          combatantId,
+          expectedRound: state.round,
+          expectedPhaseInstanceId: state.lifecycle?.phaseInstanceId,
+        });
         break;
       case "end-turn":
         if (target.disabled) break;
@@ -1486,33 +1487,40 @@ function bindDockEvents(root, combat, state) {
         break;
       case "reopen-turn":
         event.stopPropagation();
-        await requestAction(REQUESTS.REOPEN_TURN, { combatantId });
+        if (await confirmNelTempoAction({ title: t("NDI.Control.ReopenTurn"), content: t("NDI.Controls.ReopenWarning"), diagnostic: "reopen-turn" })) {
+          await requestAction(REQUESTS.REOPEN_TURN, { combatantId });
+        }
         break;
       case "timing-allow-delay": {
         event.stopPropagation();
-        const ok = await confirmDialog(t("NDI.Timing.AllowDelayOnce"), t("NDI.Timing.AllowDelayConfirm"));
+        const ok = await confirmNelTempoAction({ title: t("NDI.Timing.AllowDelayOnce"), content: t("NDI.Timing.AllowDelayConfirm"), diagnostic: "allow-delay-once" });
         if (ok) await requestAction(REQUESTS.TIMING_ALLOW_DELAY_ONCE, { combatantId, confirmed: true });
         break;
       }
       case "timing-move-rearguard":
         event.stopPropagation();
-        await requestAction(REQUESTS.TIMING_MOVE_REARGUARD, { combatantId, gmMove: true });
+        await requestAction(REQUESTS.TIMING_MOVE_REARGUARD, {
+          combatantId,
+          gmMove: true,
+          expectedRound: state.round,
+          expectedPhaseInstanceId: state.lifecycle?.phaseInstanceId,
+        });
         break;
       case "timing-resolve-priority": {
         event.stopPropagation();
-        const ok = await confirmDialog(t("NDI.Timing.ResolvePriority"), t("NDI.Timing.ResolvePriorityConfirm"));
+        const ok = await confirmNelTempoAction({ title: t("NDI.Timing.ResolvePriority"), content: t("NDI.Timing.ResolvePriorityConfirm"), diagnostic: "resolve-priority" });
         if (ok) await requestAction(REQUESTS.TIMING_RESOLVE_PRIORITY, { combatantId, confirmed: true });
         break;
       }
       case "timing-skip-priority": {
         event.stopPropagation();
-        const ok = await confirmDialog(t("NDI.Timing.SkipPriority"), t("NDI.Timing.SkipPriorityConfirm"));
+        const ok = await confirmNelTempoAction({ title: t("NDI.Timing.SkipPriority"), content: t("NDI.Timing.SkipPriorityConfirm"), diagnostic: "skip-priority" });
         if (ok) await requestAction(REQUESTS.TIMING_SKIP_PRIORITY, { combatantId, confirmed: true });
         break;
       }
       case "timing-reopen-confused": {
         event.stopPropagation();
-        const ok = await confirmDialog(t("NDI.Timing.ReopenConfusedTurn"), t("NDI.Timing.ReopenConfusedConfirm"));
+        const ok = await confirmNelTempoAction({ title: t("NDI.Timing.ReopenConfusedTurn"), content: t("NDI.Timing.ReopenConfusedConfirm"), diagnostic: "reopen-confused" });
         if (ok) await requestAction(REQUESTS.TIMING_REOPEN_CONFUSED, { combatantId, confirmed: true });
         break;
       }

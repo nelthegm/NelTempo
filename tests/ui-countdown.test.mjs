@@ -138,7 +138,7 @@ assert.equal(remainingCountdownRounds(built, 2), remainingCountdownRounds(built,
 
 // Persist across normalize / round transition
 let state = createState({ round: 1 });
-assert.equal(state.schema, 7);
+assert.equal(state.schema, 8);
 state.countdown = built;
 state = normalizeState(state, { combatantIds: [] });
 assert.equal(state.countdown.label, "Reinforcements");

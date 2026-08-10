@@ -413,7 +413,7 @@ state = createState({ round: 1 });
 state.phase = PHASES.VANGUARD;
 state.results.pc1 = { total: 20, skill: "perception", label: "Perception", phase: PHASES.VANGUARD, round: 1, at: 1 };
 const delayed = delayToRearguard(state, "pc1");
-assert.equal(delayed.delayed.pc1, true);
+assert.equal(delayed.delayed.pc1.workflowStatus, "review");
 assert.equal(delayed.results.pc1.phase, PHASES.REARGUARD);
 
 // Badges

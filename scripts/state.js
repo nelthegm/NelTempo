@@ -1,4 +1,10 @@
-import { normalizeLifecycle, interruptUncertainProcessing } from "./lifecycle.js";
+import {
+  BOUNDARY_STATUS,
+  TURN_WORKFLOW_STATUS,
+  interruptUncertainProcessing,
+  normalizeLifecycle,
+  sanitizeDelayedTurn,
+} from "./lifecycle.js";
 import {
   PLACEMENTS,
   consumeQueuedCorrections,
@@ -33,7 +39,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -236,7 +242,24 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
 
   for (const [combatantId, delayed] of Object.entries(source.delayed ?? {})) {
     if (idSet && !idSet.has(String(combatantId))) continue;
-    if (delayed) next.delayed[String(combatantId)] = true;
+    if (!delayed) continue;
+    const id = String(combatantId);
+    const cleaned = sanitizeDelayedTurn(
+      delayed === true
+        ? {
+            combatantId: id,
+            round: next.round,
+            originPhase: PHASES.VANGUARD,
+            resumePhase: PHASES.REARGUARD,
+            intentional: false,
+            workflowStatus: TURN_WORKFLOW_STATUS.REVIEW,
+            startStatus: BOUNDARY_STATUS.PENDING,
+            endStatus: BOUNDARY_STATUS.PENDING,
+          }
+        : delayed,
+      { combatantId: id, round: next.round },
+    );
+    if (cleaned) next.delayed[id] = cleaned;
   }
 
   for (const [combatantId, skill] of Object.entries(source.lastSkills ?? {})) {
@@ -439,7 +462,16 @@ export function markActed(state, combatantId, acted = true) {
 
 export function delayToRearguard(state, combatantId) {
   const next = withHistory(state, `Delay ${combatantId} to rearguard`);
-  next.delayed[combatantId] = true;
+  next.delayed[combatantId] = sanitizeDelayedTurn({
+    combatantId,
+    round: next.round,
+    originPhase: PHASES.VANGUARD,
+    resumePhase: PHASES.REARGUARD,
+    intentional: false,
+    workflowStatus: TURN_WORKFLOW_STATUS.REVIEW,
+    startStatus: BOUNDARY_STATUS.PENDING,
+    endStatus: BOUNDARY_STATUS.PENDING,
+  });
   const result = resultForCurrentRound(next, combatantId);
   if (result) result.phase = PHASES.REARGUARD;
   if (next.activeCombatantId === combatantId) next.activeCombatantId = null;

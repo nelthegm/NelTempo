@@ -136,7 +136,7 @@ legacy.lifecycle.turns.pc1.startStatus = BOUNDARY_STATUS.COMPLETED;
 legacy.lifecycle.turns.pc1.ended = true;
 legacy.lifecycle.turns.pc1.endStatus = BOUNDARY_STATUS.PENDING;
 const migrated = normalizeState(legacy, { combatantIds: ["pc1"] });
-assert.equal(migrated.schema, 7);
+assert.equal(migrated.schema, 8);
 assert.equal(migrated.lifecycleMigrationNotice, true);
 assert.equal(migrated.lifecycle.turns.pc1.startStatus, BOUNDARY_STATUS.COMPLETED);
 assert.equal(migrated.lifecycle.turns.pc1.endStatus, BOUNDARY_STATUS.PENDING);

@@ -32,6 +32,15 @@ export const TURN_ADMIN_STATUS = Object.freeze({
   REVIEW: "review",
 });
 
+export const TURN_WORKFLOW_STATUS = Object.freeze({
+  PENDING: "pending",
+  ACTIVE: "active",
+  DELAYED: "delayed",
+  COMPLETED: "completed",
+  SKIPPED: "skipped",
+  REVIEW: "review",
+});
+
 const PHASES = Object.freeze({
   INITIATIVE: "initiative",
   VANGUARD: "vanguard",
@@ -91,6 +100,7 @@ function emptyTurnRecord() {
     endClaimed: false,
     endProcessed: false,
     administrativeStatus: null,
+    delayedTurn: null,
   };
 }
 
@@ -149,6 +159,7 @@ function sanitizeTurn(entry) {
   const administrativeStatus = Object.values(TURN_ADMIN_STATUS).includes(entry.administrativeStatus)
     ? entry.administrativeStatus
     : null;
+  const delayedTurn = sanitizeDelayedTurn(entry.delayedTurn);
   return {
     ended: Boolean(entry.ended),
     endedBy: entry.endedBy == null || entry.endedBy === "" ? null : String(entry.endedBy),
@@ -177,6 +188,48 @@ function sanitizeTurn(entry) {
         ? endStatus === BOUNDARY_STATUS.COMPLETED && administrativeStatus !== TURN_ADMIN_STATUS.COMPLETE
         : Boolean(entry.endProcessed),
     administrativeStatus,
+    delayedTurn,
+  };
+}
+
+/**
+ * Normalize the durable hand-off record used while one existing lifecycle turn
+ * is parked between Vanguard and Rearguard. This is a turn snapshot, not a
+ * second lifecycle: Rearguard hydrates it back into its lifecycle turn record.
+ */
+export function sanitizeDelayedTurn(entry, { combatantId = null, round = null } = {}) {
+  if (!isPlainObject(entry)) return null;
+  const workflowStatus = Object.values(TURN_WORKFLOW_STATUS).includes(entry.workflowStatus)
+    ? entry.workflowStatus
+    : TURN_WORKFLOW_STATUS.REVIEW;
+  const startStatus = Object.values(BOUNDARY_STATUS).includes(entry.startStatus)
+    ? entry.startStatus
+    : BOUNDARY_STATUS.PENDING;
+  const endStatus = Object.values(BOUNDARY_STATUS).includes(entry.endStatus)
+    ? entry.endStatus
+    : BOUNDARY_STATUS.PENDING;
+  return {
+    combatantId: String(entry.combatantId ?? combatantId ?? ""),
+    round: Math.max(1, Number(entry.round ?? round ?? 1) || 1),
+    actualTurnId: String(entry.actualTurnId || `${entry.round ?? round ?? 1}:${entry.combatantId ?? combatantId ?? "unknown"}`),
+    originPhase: entry.originPhase === PHASES.VANGUARD ? PHASES.VANGUARD : null,
+    originPhaseInstanceId:
+      entry.originPhaseInstanceId == null || entry.originPhaseInstanceId === ""
+        ? null
+        : String(entry.originPhaseInstanceId),
+    resumePhase: entry.resumePhase === PHASES.REARGUARD ? PHASES.REARGUARD : null,
+    intentional: entry.intentional === true,
+    workflowStatus,
+    delayedAt: Number.isFinite(Number(entry.delayedAt)) ? Number(entry.delayedAt) : null,
+    delayedBy: entry.delayedBy == null || entry.delayedBy === "" ? null : String(entry.delayedBy),
+    startStatus,
+    startReason: entry.startReason == null ? null : String(entry.startReason).slice(0, 200),
+    startClaimed: Boolean(entry.startClaimed),
+    startProcessed: Boolean(entry.startProcessed),
+    endStatus,
+    endReason: entry.endReason == null ? null : String(entry.endReason).slice(0, 200),
+    endClaimed: Boolean(entry.endClaimed),
+    endProcessed: Boolean(entry.endProcessed),
   };
 }
 
@@ -338,10 +391,17 @@ export function getCombatantLifecycleStatus(lifecycle, combatantId) {
   const startReady =
     startStatus === BOUNDARY_STATUS.COMPLETED || startStatus === BOUNDARY_STATUS.SKIPPED;
   const reopened = Boolean(turn?.reopened);
+  const delayed = Boolean(
+    turn?.delayedTurn?.workflowStatus === TURN_WORKFLOW_STATUS.DELAYED &&
+    endStatus === BOUNDARY_STATUS.PENDING &&
+    !turn?.ended &&
+    !turn?.skipped,
+  );
   const turnComplete = !reopened && endStatus === BOUNDARY_STATUS.COMPLETED;
   const turnSkipped = !reopened && (endStatus === BOUNDARY_STATUS.SKIPPED || Boolean(turn?.skipped));
   const needsReview =
     turn?.administrativeStatus === TURN_ADMIN_STATUS.REVIEW ||
+    turn?.delayedTurn?.workflowStatus === TURN_WORKFLOW_STATUS.REVIEW ||
     startStatus === BOUNDARY_STATUS.FAILED ||
     startStatus === BOUNDARY_STATUS.INTERRUPTED ||
     endStatus === BOUNDARY_STATUS.FAILED ||
@@ -369,6 +429,18 @@ export function getCombatantLifecycleStatus(lifecycle, combatantId) {
     endClaimed: Boolean(turn?.endClaimed),
     endProcessed: Boolean(turn?.endProcessed),
     administrativeStatus: turn?.administrativeStatus ?? null,
+    delayed,
+    workflowStatus: needsReview
+      ? TURN_WORKFLOW_STATUS.REVIEW
+      : turnComplete
+        ? TURN_WORKFLOW_STATUS.COMPLETED
+        : turnSkipped
+          ? TURN_WORKFLOW_STATUS.SKIPPED
+          : delayed
+            ? TURN_WORKFLOW_STATUS.DELAYED
+            : startReady
+              ? TURN_WORKFLOW_STATUS.ACTIVE
+              : TURN_WORKFLOW_STATUS.PENDING,
   };
 }
 
@@ -477,7 +549,7 @@ export function canReopenTurn(lifecycle, combatantId) {
 
 /**
  * Compact UI status for portrait lifecycle pips (no internal IDs).
- * @returns {"start-pending"|"starting"|"ready"|"ended"|"review"|"skipped"|null}
+ * @returns {"start-pending"|"starting"|"ready"|"delayed"|"ended"|"review"|"skipped"|null}
  */
 export function combatantLifecycleUiStatus(lifecycle, combatantId) {
   if (!lifecycle?.turns) return null;
@@ -487,6 +559,7 @@ export function combatantLifecycleUiStatus(lifecycle, combatantId) {
   if (status.needsReview) return "review";
   if (status.turnSkipped) return "skipped";
   if (status.turnComplete) return "ended";
+  if (status.delayed) return "delayed";
   const turn = lifecycle.turns[id];
   if (
     turn?.startStatus === BOUNDARY_STATUS.PROCESSING ||
@@ -509,6 +582,188 @@ export function phaseAdvanceReady(lifecycle, { combatantIds = null } = {}) {
   if (!lifecycle) return true;
   const progress = lifecycleProgress(lifecycle, { combatantIds });
   return progress.complete;
+}
+
+function markDelayedTransferResolved(state, id, workflowStatus) {
+  const turn = state.lifecycle?.turns?.[id];
+  if (turn?.delayedTurn) turn.delayedTurn.workflowStatus = workflowStatus;
+  if (state.delayed?.[id]) delete state.delayed[id];
+}
+
+/**
+ * Park an already-started Vanguard turn for Rearguard without claiming or
+ * processing its End boundary. Removing it from the Vanguard roster makes the
+ * phase guard lane-aware; the durable snapshot is hydrated in Rearguard.
+ */
+export function delayActiveTurnToRearguard(
+  state,
+  combatantId,
+  {
+    userId = null,
+    at = Date.now(),
+    expectedRound = null,
+    expectedPhaseInstanceId = null,
+  } = {},
+) {
+  const next = cloneState(state);
+  const id = String(combatantId);
+  const lifecycle = next.lifecycle;
+  if (next.phase !== PHASES.VANGUARD || lifecycle?.phase !== PHASES.VANGUARD) {
+    return { state: next, changed: false, reason: "not-vanguard" };
+  }
+  if (expectedRound != null && Number(expectedRound) !== Number(next.round)) {
+    return { state: next, changed: false, reason: "stale-round" };
+  }
+  if (
+    expectedPhaseInstanceId != null &&
+    String(expectedPhaseInstanceId) !== String(lifecycle.phaseInstanceId)
+  ) {
+    return { state: next, changed: false, reason: "stale-phase" };
+  }
+  if (Number(lifecycle.round) !== Number(next.round)) {
+    return { state: next, changed: false, reason: "stale-lifecycle" };
+  }
+  if (next.delayed?.[id]) return { state: next, changed: false, reason: "already-delayed" };
+  if (next.activeCombatantId !== id) return { state: next, changed: false, reason: "not-active" };
+  if (lifecycle.status !== LIFECYCLE_STATUS.OPEN || !lifecycle.roster?.includes(id)) {
+    return { state: next, changed: false, reason: "lifecycle-not-open" };
+  }
+  const turn = lifecycle.turns?.[id];
+  if (!turn) return { state: next, changed: false, reason: "missing-turn" };
+  if (turn.ended || turn.skipped || [BOUNDARY_STATUS.COMPLETED, BOUNDARY_STATUS.SKIPPED].includes(turn.endStatus)) {
+    return { state: next, changed: false, reason: "already-ended" };
+  }
+  if (turn.administrativeStatus === TURN_ADMIN_STATUS.REVIEW) {
+    return { state: next, changed: false, reason: "review" };
+  }
+  if (turn.startStatus !== BOUNDARY_STATUS.COMPLETED || !turn.startClaimed || !turn.startProcessed) {
+    if ([BOUNDARY_STATUS.PENDING, BOUNDARY_STATUS.SKIPPED].includes(turn.startStatus)) {
+      return { state: next, changed: false, reason: "not-started" };
+    }
+    turn.administrativeStatus = TURN_ADMIN_STATUS.REVIEW;
+    return { state: next, changed: false, reason: "ambiguous-start", review: true };
+  }
+  if (turn.endStatus !== BOUNDARY_STATUS.PENDING || turn.endClaimed || turn.endProcessed) {
+    turn.administrativeStatus = TURN_ADMIN_STATUS.REVIEW;
+    return { state: next, changed: false, reason: "ambiguous-end", review: true };
+  }
+
+  const delayedAt = Number(at) || Date.now();
+  const delayedTurn = sanitizeDelayedTurn({
+    combatantId: id,
+    round: next.round,
+    actualTurnId: `${next.round}:${lifecycle.phaseInstanceId}:${id}`,
+    originPhase: PHASES.VANGUARD,
+    originPhaseInstanceId: lifecycle.phaseInstanceId,
+    resumePhase: PHASES.REARGUARD,
+    intentional: true,
+    workflowStatus: TURN_WORKFLOW_STATUS.DELAYED,
+    delayedAt,
+    delayedBy: userId,
+    startStatus: turn.startStatus,
+    startReason: turn.startReason,
+    startClaimed: turn.startClaimed,
+    startProcessed: turn.startProcessed,
+    endStatus: BOUNDARY_STATUS.PENDING,
+    endReason: null,
+    endClaimed: false,
+    endProcessed: false,
+  });
+  next.delayed ??= {};
+  next.delayed[id] = delayedTurn;
+  const result = next.results?.[id];
+  if (result && Number(result.round ?? next.round) === Number(next.round)) {
+    result.phase = PHASES.REARGUARD;
+  }
+  lifecycle.roster = lifecycle.roster.filter((entry) => String(entry) !== id);
+  delete lifecycle.turns[id];
+  lifecycle.start.processedCombatants = (lifecycle.start.processedCombatants ?? []).filter(
+    (entry) => String(entry) !== id,
+  );
+  lifecycle.start.failedCombatants = (lifecycle.start.failedCombatants ?? []).filter(
+    (entry) => String(entry.id) !== id,
+  );
+  lifecycle.end.processedCombatants = (lifecycle.end.processedCombatants ?? []).filter(
+    (entry) => String(entry) !== id,
+  );
+  lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter(
+    (entry) => String(entry.id) !== id,
+  );
+  if (next.acted) delete next.acted[id];
+  next.activeCombatantId = null;
+  const progress = lifecycleProgress(lifecycle);
+  lifecycle.status = progress.complete ? LIFECYCLE_STATUS.COMPLETE : LIFECYCLE_STATUS.OPEN;
+  return { state: next, changed: true, reason: null, delayedTurn };
+}
+
+/** Hydrate current-round delayed turn snapshots into a new Rearguard lifecycle. */
+export function hydrateDelayedTurns(state) {
+  const next = cloneState(state);
+  const lifecycle = next.lifecycle;
+  if (next.phase !== PHASES.REARGUARD || lifecycle?.phase !== PHASES.REARGUARD) return next;
+  for (const id of lifecycle.roster ?? []) {
+    const record = sanitizeDelayedTurn(next.delayed?.[id], {
+      combatantId: id,
+      round: next.round,
+    });
+    if (!record) continue;
+    const turn = lifecycle.turns?.[id] ?? emptyTurnRecord();
+    lifecycle.turns[id] = turn;
+    const valid =
+      record.intentional &&
+      record.workflowStatus === TURN_WORKFLOW_STATUS.DELAYED &&
+      record.originPhase === PHASES.VANGUARD &&
+      record.resumePhase === PHASES.REARGUARD &&
+      Number(record.round) === Number(next.round) &&
+      record.startStatus === BOUNDARY_STATUS.COMPLETED &&
+      record.startClaimed &&
+      record.startProcessed &&
+      record.endStatus === BOUNDARY_STATUS.PENDING &&
+      !record.endClaimed &&
+      !record.endProcessed;
+    turn.delayedTurn = { ...record };
+    turn.startStatus = record.startStatus;
+    turn.startReason = record.startReason;
+    turn.startClaimed = record.startClaimed;
+    turn.startProcessed = record.startProcessed;
+    turn.endStatus = record.endStatus;
+    turn.endReason = record.endReason;
+    turn.endClaimed = record.endClaimed;
+    turn.endProcessed = record.endProcessed;
+    turn.ended = false;
+    turn.skipped = false;
+    turn.administrativeStatus = valid ? null : TURN_ADMIN_STATUS.REVIEW;
+    if (!valid) turn.delayedTurn.workflowStatus = TURN_WORKFLOW_STATUS.REVIEW;
+    if (valid && !lifecycle.start.processedCombatants.includes(id)) {
+      lifecycle.start.processedCombatants.push(id);
+    }
+    if (next.acted) delete next.acted[id];
+  }
+  return next;
+}
+
+export function unresolvedDelayedTurnIds(state) {
+  return Object.entries(state?.delayed ?? {})
+    .filter(([, entry]) => {
+      const record = sanitizeDelayedTurn(entry, { round: state?.round });
+      return record &&
+        Number(record.round) === Number(state?.round) &&
+        [TURN_WORKFLOW_STATUS.DELAYED, TURN_WORKFLOW_STATUS.REVIEW].includes(record.workflowStatus);
+    })
+    .map(([id]) => String(id));
+}
+
+/** Emergency Guard-Off cleanup for corrupt/missing Rearguard roster entries. */
+export function skipUnresolvedDelayedTurns(state) {
+  const next = cloneState(state);
+  const skipped = unresolvedDelayedTurnIds(next);
+  for (const id of skipped) {
+    if (next.delayed?.[id]) delete next.delayed[id];
+    next.acted ??= {};
+    next.acted[id] = true;
+    if (next.activeCombatantId === id) next.activeCombatantId = null;
+  }
+  return { state: next, changed: skipped.length > 0, skipped };
 }
 
 function settleAdministrativeStart(lifecycle, turn, id, reason) {
@@ -560,6 +815,7 @@ export function markTurnSkipped(state, combatantId, { userId = null, at = Date.n
   turn.endClaimed = true;
   turn.endProcessed = false;
   turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+  markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.SKIPPED);
   lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   next.acted ??= {};
   next.acted[id] = true;
@@ -587,6 +843,7 @@ export function skipPendingEnds(state, { reason = "advance-without-processing" }
     turn.endClaimed = true;
     turn.endProcessed = false;
     turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+    markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.SKIPPED);
     turn.skipped = true;
     turn.ended = true;
     turn.reopened = false;
@@ -627,6 +884,7 @@ export function markTurnEnded(state, combatantId, { userId = null, at = Date.now
   turn.endedAt = Number(at) || Date.now();
   turn.reopenedAt = null;
   turn.reopened = false;
+  markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.COMPLETED);
   next.acted ??= {};
   next.acted[id] = true;
   if (next.activeCombatantId === id) next.activeCombatantId = null;
@@ -702,6 +960,7 @@ export function markTurnCompleteAdministrative(
     turn.endedBy = userId == null ? turn.endedBy : String(userId);
     turn.endedAt ??= Number(at) || Date.now();
     turn.reopened = false;
+    markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.COMPLETED);
     next.acted ??= {};
     next.acted[id] = true;
     const restoredProgress = lifecycleProgress(lifecycle);
@@ -719,6 +978,7 @@ export function markTurnCompleteAdministrative(
   turn.endClaimed = true;
   turn.endProcessed = false;
   turn.administrativeStatus = TURN_ADMIN_STATUS.COMPLETE;
+  markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.COMPLETED);
   lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((entry) => entry.id !== id);
   next.acted ??= {};
   next.acted[id] = true;
@@ -746,6 +1006,8 @@ export function markTurnReview(state, combatantId, { reason = "gm-mark-review" }
     return { state: next, changed: false, reason: "boundary-processing" };
   }
   turn.administrativeStatus = TURN_ADMIN_STATUS.REVIEW;
+  if (turn.delayedTurn) turn.delayedTurn.workflowStatus = TURN_WORKFLOW_STATUS.REVIEW;
+  if (next.delayed?.[id]) next.delayed[id].workflowStatus = TURN_WORKFLOW_STATUS.REVIEW;
   if (turn.endStatus === BOUNDARY_STATUS.PENDING) turn.endReason = reason;
   if (lifecycle.status === LIFECYCLE_STATUS.COMPLETE) lifecycle.status = LIFECYCLE_STATUS.OPEN;
   return { state: next, changed: true, reason: null };
@@ -778,6 +1040,7 @@ export function skipRemainingTurns(state, { userId = null, at = Date.now(), reas
     turn.endClaimed = true;
     turn.endProcessed = false;
     turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+    markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.SKIPPED);
     turn.reopened = false;
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
     next.acted ??= {};
@@ -897,6 +1160,13 @@ export function markCombatantEndProcessing(state, combatantId) {
   next.lifecycle.turns[id].endReason = null;
   next.lifecycle.turns[id].endClaimed = true;
   next.lifecycle.turns[id].endProcessed = false;
+  if (next.delayed?.[id]) {
+    next.delayed[id].workflowStatus = TURN_WORKFLOW_STATUS.REVIEW;
+    next.delayed[id].endStatus = BOUNDARY_STATUS.PROCESSING;
+    next.delayed[id].endReason = null;
+    next.delayed[id].endClaimed = true;
+    next.delayed[id].endProcessed = false;
+  }
   return next;
 }
 
@@ -914,12 +1184,14 @@ export function markCombatantEndResult(state, combatantId, { ok, reason = null, 
     turn.endClaimed = true;
     turn.endProcessed = false;
     turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+    markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.SKIPPED);
   } else if (ok) {
     turn.endStatus = BOUNDARY_STATUS.COMPLETED;
     turn.endReason = null;
     turn.endClaimed = true;
     turn.endProcessed = true;
     turn.administrativeStatus = null;
+    markDelayedTransferResolved(next, id, TURN_WORKFLOW_STATUS.COMPLETED);
     lifecycle.end.processedCombatants = uniquePush(lifecycle.end.processedCombatants, id);
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   } else {
@@ -931,6 +1203,13 @@ export function markCombatantEndResult(state, combatantId, { ok, reason = null, 
       ...(lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id),
       { id, reason: turn.endReason },
     ];
+    if (next.delayed?.[id]) {
+      next.delayed[id].workflowStatus = TURN_WORKFLOW_STATUS.REVIEW;
+      next.delayed[id].endStatus = BOUNDARY_STATUS.FAILED;
+      next.delayed[id].endReason = turn.endReason;
+      next.delayed[id].endClaimed = true;
+      next.delayed[id].endProcessed = false;
+    }
   }
   return next;
 }
@@ -1043,6 +1322,13 @@ export function buildLifecycleInspection(lifecycle, combatantId) {
     phaseInstanceId: lifecycle?.phaseInstanceId ?? null,
     lifecycleStatus: lifecycle?.status ?? null,
     turnStatus: combatantLifecycleUiStatus(lifecycle, id),
+    workflowStatus: status.workflowStatus,
+    delayed: status.delayed,
+    actualTurnId: turn?.delayedTurn?.actualTurnId ?? null,
+    originalPhase: turn?.delayedTurn?.originPhase ?? null,
+    originalPhaseInstanceId: turn?.delayedTurn?.originPhaseInstanceId ?? null,
+    resumePhase: turn?.delayedTurn?.resumePhase ?? null,
+    intentionalDelay: Boolean(turn?.delayedTurn?.intentional),
     reopened: status.reopened,
     administrativeStatus: status.administrativeStatus,
     start: boundary("start"),
@@ -1082,6 +1368,7 @@ export function skipFailedEnds(state, combatantIds = null) {
     turn.endClaimed = true;
     turn.endProcessed = false;
     turn.administrativeStatus = TURN_ADMIN_STATUS.SKIPPED;
+    markDelayedTransferResolved(next, String(id), TURN_WORKFLOW_STATUS.SKIPPED);
     lifecycle.end.failedCombatants = (lifecycle.end.failedCombatants ?? []).filter((e) => e.id !== id);
   }
   return next;
