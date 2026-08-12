@@ -15,6 +15,7 @@
 - Repaired phase/recovery confirmation paths that could fail on an undefined dialog helper.
 - Fixes a delayed combatant being omitted from Rearguard when an earlier
   current-round GM placement still pointed to Vanguard.
+- Runtime acceptance passed on Foundry 14.365, PF2e 8.4.0, and Forge VTT; promoted to stable `v0.4.0`.
 
 ## 0.3.6
 
