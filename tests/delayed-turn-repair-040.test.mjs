@@ -10,6 +10,7 @@ import {
   TURN_ADMIN_STATUS,
   TURN_WORKFLOW_STATUS,
   buildLifecycleInspection,
+  buildRosterIds,
   canEndTurn,
   canRetryStartBoundary,
   combatantLifecycleUiStatus,
@@ -32,7 +33,12 @@ import {
 } from "../scripts/lifecycle.js";
 import { applyCurrentRoundPlacement, PLACEMENTS } from "../scripts/placement-editor.js";
 import { processEndTurn, processStartTurn } from "../scripts/pf2e-lifecycle-adapter.js";
-import { PHASES, createState, normalizeState } from "../scripts/state.js";
+import {
+  PHASES,
+  createState,
+  getCombatantInitiativeLane,
+  normalizeState,
+} from "../scripts/state.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const controllerSource = readFileSync(join(root, "scripts/controller.js"), "utf8");
@@ -140,6 +146,26 @@ await test("7 Delayed actor appears in Rearguard", () => {
   const state = enterRearguard(delay().state);
   assert.ok(state.lifecycle.roster.includes("pc1"));
   assert.ok(state.lifecycle.turns.pc1.delayedTurn);
+});
+
+await test("7a Delay overrides a current-round GM Vanguard placement", () => {
+  const placed = applyCurrentRoundPlacement(
+    activeVanguard(),
+    "pc1",
+    PLACEMENTS.VANGUARD,
+    { userId: "gm" },
+  );
+  const delayed = delay(placed).state;
+  const reloaded = normalizeState(delayed, { combatantIds: ["pc1"] });
+  const lane = getCombatantInitiativeLane(reloaded, "pc1");
+  assert.equal(lane, PHASES.REARGUARD);
+  assert.deepEqual(
+    buildRosterIds(
+      [{ id: "pc1", side: "party", phase: lane, initiativeTotal: null, delayed: true }],
+      PHASES.REARGUARD,
+    ),
+    ["pc1"],
+  );
 });
 
 await test("8 Delayed actor is not visually Ended", () => {
@@ -477,5 +503,5 @@ const orphaned = delay().state;
 orphaned.lifecycle = null;
 assert.deepEqual(skipUnresolvedDelayedTurns(orphaned).skipped, ["pc1"]);
 
-assert.equal(count, 57);
+assert.equal(count, 58);
 console.log(`${count} NelTempo 0.4.0 delayed-turn/dialog/PF2e repair tests passed.`);

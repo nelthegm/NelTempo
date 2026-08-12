@@ -19,10 +19,13 @@ function currentRoundEntry(map, state, combatantId) {
  */
 export function selectCombatantInitiativeLane(state, combatantId, side = "party") {
   const id = String(combatantId);
+  // Delay is a live transfer of the current turn, so it must override any
+  // earlier GM placement for this round. Otherwise a combatant corrected into
+  // Vanguard can be parked successfully but omitted from Rearguard's roster.
+  if (state?.delayed?.[id]) return INITIATIVE_LANES.REARGUARD;
   const placement = currentRoundEntry(state?.placements, state, id);
   if (Object.values(INITIATIVE_LANES).includes(placement?.phase)) return placement.phase;
   if (side === "enemy") return INITIATIVE_LANES.ENEMY;
-  if (state?.delayed?.[id]) return INITIATIVE_LANES.REARGUARD;
   const result = currentRoundEntry(state?.results, state, id);
   if (result?.phase === INITIATIVE_LANES.VANGUARD) return INITIATIVE_LANES.VANGUARD;
   if (result?.phase === INITIATIVE_LANES.REARGUARD) return INITIATIVE_LANES.REARGUARD;

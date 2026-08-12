@@ -13,6 +13,8 @@
 - A delayed combatant resumes the same turn in Rearguard without duplicate PF2e Start Turn processing.
 - Delaying does not invoke PF2e End Turn.
 - Repaired phase/recovery confirmation paths that could fail on an undefined dialog helper.
+- Fixes a delayed combatant being omitted from Rearguard when an earlier
+  current-round GM placement still pointed to Vanguard.
 
 ## 0.3.6
 

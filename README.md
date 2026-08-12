@@ -32,7 +32,7 @@ This is the permanent Forge / Foundry install channel. **NelTempo 0.4.0** adds c
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.4.0-rc1/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.4.0-rc2/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 

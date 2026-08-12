@@ -1,4 +1,4 @@
-# NelTempo 0.4.0 RC1 mandatory runtime plan
+# NelTempo 0.4.0 RC2 mandatory runtime plan
 
 Run on Foundry `14.365` with PF2e `8.4.x`. Record the world, browser, module build SHA-256, Guard setting, and observed chat/effect changes for every case.
 
