@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Adds a narrow source-linked timing bridge for finite PF2e Effects with a unique structured origin and source-turn expiry.
+- Anchors supported expiry to the source combatant's existing actual Start/End lifecycle, never phase entry, phase exit, round increment, administrative movement, reaction, or readied action.
+- Adds durable exactly-once state, interrupted-processing Review recovery, native removal reconciliation, combatant removal/defeat fail-open handling, and primary-GM authority.
+- Keeps standard Grabbed, Restrained, Grapple, and monster Grab native when PF2e supplies no unique structured origin.
+- Extends the GM Lifecycle Inspector with privacy-safe source-linked status.
+- Adds 57 focused compatibility scenarios plus a PF2e 8.4.0 audit, RC1 manual runtime plan, and release notes.
+- Preserves all accepted 0.4.0 lifecycle, Delay, Awaiting Roll, recovery, authority, confirmation, and Confused behavior.
+
 ## 0.4.0
 
 - Fixes unresolved current-round player initiative so portraits render in **Awaiting Roll**, never as an inferred Rearguard failure.

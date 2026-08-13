@@ -27,6 +27,7 @@ import {
   resolvedPhaseBarLayoutNow,
 } from "./presentation.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
+import { sourceLinkedInspection } from "./source-linked-timing.js";
 import { isTimingEnforced } from "./timing-service.js";
 import {
   evaluateDelayEligibility,
@@ -1046,6 +1047,7 @@ async function openLifecycleInspector(combatantId) {
         ? t("NDI.Inspector.Failure")
         : placementPhaseLabel(result.phase);
   const life = projection.inspection;
+  const sourceLinks = sourceLinkedInspection(state.sourceLinkedTiming, combatantId);
   const primaryGM = game.users?.activeGM ?? game.users
     ?.filter?.((user) => user.active && user.isGM)
     ?.sort?.((a, b) => String(a.id).localeCompare(String(b.id)))?.[0];
@@ -1066,6 +1068,19 @@ async function openLifecycleInspector(combatantId) {
         </dl>
       </section>`
     : "";
+  const sourceLinkRows = sourceLinks.length
+    ? `<section class="ndi-inspector-section">
+        <h3>${escapeHTML(t("NDI.Inspector.SourceLinkedTiming"))}</h3>
+        <ul>${sourceLinks.map((entry) =>
+          `<li>${escapeHTML(t("NDI.Inspector.SourceLinkedEntry", {
+            role: entry.role,
+            boundary: entry.boundary ?? "review",
+            round: entry.dueRound,
+            status: entry.status,
+          }))}${entry.reason ? ` — ${escapeHTML(entry.reason)}` : ""}</li>`,
+        ).join("")}</ul>
+      </section>`
+    : "";
   const content = `<div class="ndi-lifecycle-inspector">
     <p><strong>${escapeHTML(combatantName(combatant))}</strong></p>
     <dl>
@@ -1082,6 +1097,7 @@ async function openLifecycleInspector(combatantId) {
     </dl>
     ${boundaryRows(t("NDI.Inspector.StartBoundary"), life?.start)}
     ${boundaryRows(t("NDI.Inspector.EndBoundary"), life?.end)}
+    ${sourceLinkRows}
   </div>`;
   const DialogV2 = foundry?.applications?.api?.DialogV2;
   if (!DialogV2?.wait) return notifyFallback(content);

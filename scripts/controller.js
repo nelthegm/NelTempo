@@ -69,6 +69,15 @@ import {
 import { adapterReasonMessage, processEndTurn, processStartTurn } from "./pf2e-lifecycle-adapter.js";
 import { clearManagedRaisedShields, expireDefensesForCombatant, expireDueRaisedShields } from "./shields.js";
 import {
+  processSourceLinkedBoundary,
+  reconcileSourceLinkedCombat,
+  releaseSourceLinkedEffects,
+} from "./source-linked-timing-service.js";
+import {
+  SOURCE_LINK_BOUNDARY,
+  reviewSourceLinkedAdministrativeBoundary,
+} from "./source-linked-timing.js";
+import {
   applyEndTurnTiming,
   applyReopenTiming,
   isTimingEnforced,
@@ -334,6 +343,40 @@ async function maybePostPhaseLifecycleSummary(combat, state, lines) {
   await publicChat(body);
 }
 
+async function processSourceLinkedBoundarySafely(combat, state, combatantId, kind) {
+  try {
+    return (await processSourceLinkedBoundary(combat, state, combatantId, kind)).state;
+  } catch (error) {
+    console.error(`${MODULE_ID} | source-linked boundary needs review`, {
+      combatId: shortId(combat?.id),
+      combatantId: shortId(combatantId),
+      reason: error?.message ?? "source-link-boundary-failed",
+    });
+    try {
+      await reconcileSourceLinkedCombat(combat, { reason: "boundary-failed" });
+    } catch (_reconcileError) {
+      // Native PF2e Start/End remains authoritative and must still proceed.
+    }
+    return getState(combat) ?? state;
+  }
+}
+
+function reviewAdministrativeSourceLinks(
+  state,
+  combatantIds,
+  reason,
+  boundaries = Object.values(SOURCE_LINK_BOUNDARY),
+) {
+  const next = structuredClone(state);
+  for (const combatantId of new Set((combatantIds ?? []).map(String))) {
+    next.sourceLinkedTiming = reviewSourceLinkedAdministrativeBoundary(
+      next.sourceLinkedTiming,
+      { combatantId, round: next.round, boundaries, reason },
+    );
+  }
+  return next;
+}
+
 async function runStartBoundary(
   combat,
   state,
@@ -410,6 +453,7 @@ async function runStartBoundary(
     }
 
     if (result.ok) {
+      next = await processSourceLinkedBoundarySafely(combat, next, combatantId, "start");
       next = markCombatantStartResult(next, combatantId, { ok: true });
       next = await expireDefensesForCombatant(combat, next, combatantId);
       emitCombatantTurnReady(combat, next, combatantId);
@@ -424,6 +468,14 @@ async function runStartBoundary(
       });
     } else {
       anyFailed = true;
+      if (result.nativeMethod) {
+        next = reviewAdministrativeSourceLinks(
+          next,
+          [combatantId],
+          "native-start-ambiguous",
+          [SOURCE_LINK_BOUNDARY.SOURCE_START, SOURCE_LINK_BOUNDARY.TARGET_START],
+        );
+      }
       next = markCombatantStartResult(next, combatantId, {
         ok: false,
         reason: adapterReasonMessage(result),
@@ -505,11 +557,21 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
   }
 
   if (!result.ok) {
+    if (result.nativeMethod) {
+      next = reviewAdministrativeSourceLinks(
+        next,
+        [id],
+        "native-end-ambiguous",
+        [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
+      );
+    }
     next = markCombatantEndResult(next, id, { ok: false, reason: adapterReasonMessage(result) });
     await persistState(combat, next, "combatant-end-failed");
     emitLifecycleReview(combat, next, id, "end");
     return { state: next, ok: false, reason: adapterReasonMessage(result) };
   }
+
+  next = await processSourceLinkedBoundarySafely(combat, next, id, "end");
 
   next = markCombatantEndResult(next, id, { ok: true });
   const after = next.lifecycle?.turns?.[id];
@@ -608,6 +670,7 @@ async function runEndBoundary(
 
     const result = await processEndTurn(combat, combatantId, { round: next.round });
     if (result.ok) {
+      next = await processSourceLinkedBoundarySafely(combat, next, combatantId, "end");
       next = markCombatantEndResult(next, combatantId, { ok: true });
       lifecycleDiag("combatant-end-complete", combat, next, {
         combatantId: shortId(combatantId),
@@ -615,6 +678,14 @@ async function runEndBoundary(
       });
     } else {
       failed = true;
+      if (result.nativeMethod) {
+        next = reviewAdministrativeSourceLinks(
+          next,
+          [combatantId],
+          "native-end-ambiguous",
+          [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
+        );
+      }
       next = markCombatantEndResult(next, combatantId, {
         ok: false,
         reason: adapterReasonMessage(result),
@@ -726,6 +797,12 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
         }
         if (orphaned.length > 0 && (!shouldGuardIncompletePhase() || force)) {
           next = skipUnresolvedDelayedTurns(next).state;
+          next = reviewAdministrativeSourceLinks(
+            next,
+            orphaned,
+            "orphaned-delayed-skip",
+            [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
+          );
         }
       }
 
@@ -762,6 +839,11 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
             next = skipped.state;
             const pending = skipPendingEnds(next, { reason: "guard-disabled-advance" });
             next = pending.state;
+            next = reviewAdministrativeSourceLinks(
+              next,
+              [...skipped.skipped, ...pending.skipped],
+              "guard-disabled-advance",
+            );
             lifecycleDiag("phase-advanced-unguarded", combat, next, {
               skipped: skipped.skipped.length,
               endsSkipped: pending.skipped.length,
@@ -807,6 +889,11 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
             next = skipped.state;
             const pending = skipPendingEnds(next, { reason: "advance-without-processing" });
             next = pending.state;
+            next = reviewAdministrativeSourceLinks(
+              next,
+              [...skipped.skipped, ...pending.skipped],
+              "advance-without-processing",
+            );
             lifecycleDiag("phase-force-advanced", combat, next, {
               skipped: skipped.skipped.length,
               endsSkipped: pending.skipped.length,
@@ -1362,7 +1449,14 @@ async function retryFailedStart(combat, state) {
 }
 
 async function skipFailedStartHandler(combat, state) {
+  const failedIds = startCandidates(state.lifecycle, { onlyFailedOrInterrupted: true });
   let next = skipFailedStarts(withHistory(state, "Skip failed starts"));
+  next = reviewAdministrativeSourceLinks(
+    next,
+    failedIds,
+    "failed-start-skipped",
+    [SOURCE_LINK_BOUNDARY.SOURCE_START, SOURCE_LINK_BOUNDARY.TARGET_START],
+  );
   // If all starts resolved, open the phase.
   const pending = startCandidates(next.lifecycle);
   if (pending.length === 0) {
@@ -1405,7 +1499,14 @@ async function retryFailedEnd(combat, state) {
 }
 
 async function skipFailedEndHandler(combat, state) {
+  const failedIds = endCandidates(state.lifecycle, { onlyFailedOrInterrupted: true });
   let next = skipFailedEnds(withHistory(state, "Skip failed ends"));
+  next = reviewAdministrativeSourceLinks(
+    next,
+    failedIds,
+    "failed-end-skipped",
+    [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
+  );
   const pending = endCandidates(next.lifecycle);
   if (pending.length === 0) {
     next = completeEndBoundary(next, { error: false });
@@ -1626,6 +1727,7 @@ async function undo(combat, state) {
 }
 
 async function endDynamicCombat(combat, state) {
+  await releaseSourceLinkedEffects(combat, state);
   const cleaned = await clearManagedRaisedShields(combat, state);
   const next = foundry.utils.deepClone(cleaned ?? state);
   next.enabled = false;
@@ -1837,10 +1939,19 @@ async function runSingleCombatantStart(combat, state, combatantId) {
 
   const result = await processStartTurn(combat, id);
   if (result.ok) {
+    next = await processSourceLinkedBoundarySafely(combat, next, id, "start");
     next = markCombatantStartResult(next, id, { ok: true });
     next = await expireDefensesForCombatant(combat, next, id);
     emitCombatantTurnReady(combat, next, id);
   } else {
+    if (result.nativeMethod) {
+      next = reviewAdministrativeSourceLinks(
+        next,
+        [id],
+        "native-start-ambiguous",
+        [SOURCE_LINK_BOUNDARY.SOURCE_START, SOURCE_LINK_BOUNDARY.TARGET_START],
+      );
+    }
     next = markCombatantStartResult(next, id, {
       ok: false,
       reason: adapterReasonMessage(result),
@@ -1909,6 +2020,15 @@ async function markCombatantComplete(combat, state, payload, requestUser) {
     { userId: requestUser.id },
   );
   if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  result.state.sourceLinkedTiming = reviewSourceLinkedAdministrativeBoundary(
+    result.state.sourceLinkedTiming,
+    {
+      combatantId: combatant.id,
+      round: result.state.round,
+      boundaries: [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
+      reason: "administrative-complete",
+    },
+  );
   await persistState(combat, result.state, "mark-turn-complete");
   await clearNativeTurn(combat);
   if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
@@ -1927,6 +2047,14 @@ async function markCombatantSkipped(combat, state, payload, requestUser) {
     { userId: requestUser.id, reason: "gm-mark-skipped" },
   );
   if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  result.state.sourceLinkedTiming = reviewSourceLinkedAdministrativeBoundary(
+    result.state.sourceLinkedTiming,
+    {
+      combatantId: combatant.id,
+      round: result.state.round,
+      reason: "administrative-skip",
+    },
+  );
   await persistState(combat, result.state, "mark-turn-skipped");
   await clearNativeTurn(combat);
   if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
@@ -1944,6 +2072,14 @@ async function markCombatantReview(combat, state, payload, requestUser) {
     combatant.id,
   );
   if (!result.changed) throw new Error(localize("NDI.Lifecycle.AdministrativeRejected"));
+  result.state.sourceLinkedTiming = reviewSourceLinkedAdministrativeBoundary(
+    result.state.sourceLinkedTiming,
+    {
+      combatantId: combatant.id,
+      round: result.state.round,
+      reason: "administrative-review",
+    },
+  );
   await persistState(combat, result.state, "mark-lifecycle-review");
   return result.state;
 }

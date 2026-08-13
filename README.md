@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current version:** 0.4.0
+**Current version:** 0.5.0 RC1 candidate
 **Module ID:** `nel-dynamic-initiative`
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
 
@@ -27,12 +27,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This is the permanent Forge / Foundry install channel for stable **NelTempo 0.4.0**, runtime-accepted on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. It adds current-round Awaiting Roll placement plus GM combatant lifecycle controls and recovery. The internal module ID remains `nel-dynamic-initiative`.
+This manifest currently prepares **NelTempo 0.5.0** for eventual `v0.5.0-rc1` runtime acceptance. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.4.0/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.5.0-rc1/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 
@@ -66,6 +66,12 @@ game.dynamicInitiative.start();
 7. Advance from **Rearguard** to **Initiative** to begin the next round and prompt new checks.
 
 Right-click any combatant portrait to open **NelTempo Combatant Controls**. Lifecycle processing actions are separate from administrative corrections: **End Turn** invokes the real PF2e end boundary, while **Mark Complete**, **Mark Skipped**, and **Mark Review** never replay PF2e mechanics. **Reopen Turn** restores only the NelTempo workflow and does not undo actor changes or permit a settled boundary to run twice.
+
+NelTempo tracks real combatant Start/End boundaries only. Reactions do not create NelTempo turns, and readied actions do not create or reopen NelTempo turns. PF2e resolves both normally without changing NelTempo lifecycle state.
+
+## Source-linked timing (0.5.0)
+
+NelTempo 0.5.0 hardens compatibility with PF2e's native turn-timing mechanics. Finite PF2e Effect items with a unique structured origin can follow that source combatant's actual Start or End instead of a phase transition. PF2e still owns Effect and Condition mechanics; NelTempo adds only the minimal boundary bookkeeping its non-sequential phase model requires. Ambiguous, missing, prose-only, Grabbed/Restrained, Grapple, and monster Grab sources fail open and remain native PF2e behavior. NelTempo never guesses a source from names, proximity, chat, or descriptions. See `docs/NELTEMPO_0.5.0_PF2E_TIMING_AUDIT.md` and `docs/NELTEMPO_0.5.0_TEST_PLAN.md`.
 
 ## Portrait dock layout
 

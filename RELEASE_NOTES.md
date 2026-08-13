@@ -1,10 +1,10 @@
-# NelTempo 0.4.0
+# NelTempo 0.5.0 RC1
 
-- Delaying to Rearguard now preserves the current open turn instead of treating the combatant as already finished.
-- A delayed combatant resumes the same turn in Rearguard without duplicate PF2e Start Turn processing.
-- Delaying does not invoke PF2e End Turn.
-- Repaired phase/recovery confirmation paths that could fail on an undefined dialog helper.
-- A delayed turn now overrides an earlier same-round GM placement when the
-  Rearguard roster is built, including after reload.
+NelTempo 0.5.0 hardens compatibility with PF2e's native turn-timing mechanics. It verifies and repairs only proven gaps caused by phase-based combat. Reactions and readied actions remain native PF2e activity and never create NelTempo turns.
 
-Runtime acceptance passed on Foundry VTT 14.365, PF2e 8.4.0, and Forge VTT. This is the stable `v0.4.0` release.
+- Adds conservative structured source-start/source-end Effect compatibility tied to the existing actual-turn lifecycle.
+- Reconciles native removal, reload, combatant removal/defeat, and combat end without guessing PF2e rules.
+- Reactions and readied actions remain PF2e-native no-ops for NelTempo state.
+- Preserves stable 0.4.0 Delay, recovery, Awaiting Roll, authority, and Confused behavior.
+
+This is local prerelease preparation for eventual `v0.5.0-rc1`; live Foundry/Forge acceptance is still required.

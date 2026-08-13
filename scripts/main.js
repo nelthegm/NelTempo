@@ -9,6 +9,12 @@ import { isTrackedConditionItem } from "./pf2e-condition-adapter.js";
 import { migrateLegacyInterfaceScale, isTextEntryTarget } from "./presentation.js";
 import { registerRaisedShield } from "./shields.js";
 import {
+  reconcileSourceLinkedCombat,
+  reconcileSourceLinkedItem,
+  reconcileSourceLinkedItemDeletion,
+  releaseSourceLinkedEffects,
+} from "./source-linked-timing-service.js";
+import {
   handleInitiativePrompt,
   removeUI,
   renderDock,
@@ -298,7 +304,9 @@ Hooks.once("ready", () => {
     render: renderDock,
   });
 
-  void reconcileLifecycleOnReady();
+  void reconcileLifecycleOnReady().then(() =>
+    reconcileSourceLinkedCombat(getCombat(), { reason: "ready-reload" }),
+  );
   renderDock();
   debug("Ready", { core: game.version, pf2e: game.system.version });
 });
@@ -317,17 +325,31 @@ for (const hook of [
 }
 
 Hooks.on("deleteCombat", () => removeUI());
+Hooks.on("preDeleteCombat", (combat) => {
+  const state = getState(combat);
+  if (state?.enabled) void releaseSourceLinkedEffects(combat, state);
+});
 Hooks.on("renderCombatTracker", addTrackerLauncher);
-Hooks.on("createItem", (item) => {
+Hooks.on("createItem", (item, options) => {
   void registerRaisedShield(item);
+  void reconcileSourceLinkedItem(item, options);
   queueConditionTimingReconcile(item);
 });
 Hooks.on("updateItem", (item, changes, options) => {
   if (!options?.[`${MODULE_ID}.shieldManagement`]) void registerRaisedShield(item);
+  void reconcileSourceLinkedItem(item, options);
   queueConditionTimingReconcile(item);
   queueMicrotask(renderDock);
 });
-Hooks.on("deleteItem", (item) => {
+Hooks.on("deleteItem", (item, options) => {
+  void reconcileSourceLinkedItemDeletion(item, options);
   queueConditionTimingReconcile(item);
   queueMicrotask(renderDock);
+});
+
+Hooks.on("deleteCombatant", () => {
+  queueMicrotask(() => void reconcileSourceLinkedCombat(getCombat(), { reason: "combatant-removed" }));
+});
+Hooks.on("updateCombatant", () => {
+  queueMicrotask(() => void reconcileSourceLinkedCombat(getCombat(), { reason: "combatant-updated" }));
 });

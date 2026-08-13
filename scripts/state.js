@@ -14,6 +14,11 @@ import {
 } from "./placement-editor.js";
 import { sanitizeCountdown } from "./countdown.js";
 import { selectCombatantInitiativeLane } from "./initiative-lane.js";
+import {
+  createSourceLinkedTiming,
+  normalizeSourceLinkedTiming,
+  recoverInterruptedSourceLinkedTiming,
+} from "./source-linked-timing.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -39,7 +44,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -76,6 +81,8 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     placementAudit: [],
     /** Optional public encounter countdown (schema 5). */
     countdown: null,
+    /** Structured PF2e Effect relationships anchored to actual-turn boundaries. */
+    sourceLinkedTiming: createSourceLinkedTiming(),
     /**
      * One-shot GM notice after upgrading an active combat to 0.3.5 turn timing.
      * When true, show migration dialog; cleared by ACK_LIFECYCLE_MIGRATION.
@@ -223,6 +230,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     placementCorrections: {},
     placementAudit: [],
     countdown: null,
+    sourceLinkedTiming: createSourceLinkedTiming(),
     lifecycleMigrationNotice: false,
     history: [],
   };
@@ -288,6 +296,9 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
   });
   next.placementAudit = normalizePlacementAudit(source.placementAudit);
   next.countdown = sanitizeCountdown(source.countdown);
+  next.sourceLinkedTiming = source._interruptLifecycleProcessing
+    ? recoverInterruptedSourceLinkedTiming(source.sourceLinkedTiming)
+    : normalizeSourceLinkedTiming(source.sourceLinkedTiming);
 
   // Lifecycle: normalize and prune roster against current combatants.
   // Never invent a lifecycle for Initiative; preserve open/ending instances.

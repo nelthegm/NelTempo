@@ -36,7 +36,7 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
 
 ```js
 {
-  schema: 8,                 // document schema version
+  schema: 9,                 // document schema version
   revision: 0,               // increments on successful state writes only
   enabled: true,
   phase: "initiative" | "vanguard" | "enemy" | "rearguard",
@@ -76,6 +76,8 @@ Portrait activation (0.3.1) is **not** combat state: see `docs/SLICE_0_3_1_PORTR
 Schema **5** (0.3.2) adds optional `countdown: { label, triggerRound, createdRound, createdBy }` — remaining display is derived from `triggerRound - currentRound`. Client interface scale and token-selected indicators are local-only.
 
 Schema **8** (0.4.0 repair) makes Delay an explicit lifecycle hand-off. A `DelayedTurnSnapshot` records the same round and actual-turn id, Vanguard phase instance, intentional Rearguard resume lane, and claimed/processed Start and End boundaries. Vanguard transfers the open turn out of its roster without settling End; Rearguard hydrates the snapshot into its own lifecycle turn record. Administrative placement never creates this snapshot.
+
+Schema **9** adds a top-level source-linked timing registry. It references PF2e Effect documents and the existing actual-turn identity; it does not create a parallel condition lifecycle. Pending/Processing state supports exactly-once source Start/End processing, while interrupted or ambiguous entries become Review and fail open.
 
 See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 

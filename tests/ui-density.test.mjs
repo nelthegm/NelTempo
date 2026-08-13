@@ -18,12 +18,12 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const moduleJson = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-assert.equal(moduleJson.version, "0.4.0");
+assert.equal(moduleJson.version, "0.5.0");
 assert.equal(moduleJson.id, "nel-dynamic-initiative");
 assert.equal(moduleJson.title, "NelTempo");
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.4.0/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.5.0-rc1/dynamic-initiative.zip",
 );
 
 assert.equal(SETTINGS.PORTRAIT_SCALE, "portraitScale");

@@ -76,6 +76,8 @@
   "NDI.Inspector.TakingTurn": "Taking Turn",
   "NDI.Inspector.NotInLifecycle": "Not in active lifecycle roster",
   "NDI.Inspector.NoPrimaryGM": "No active primary GM",
+  "NDI.Inspector.SourceLinkedTiming": "Source-Linked Timing",
+  "NDI.Inspector.SourceLinkedEntry": "{role}: {boundary}, round {round}, {status}",
 
   "NDI.Lifecycle.PhaseComplete": "Phase Complete",
   "NDI.Lifecycle.EndedProgress": "Ended {ended} / {total}",
