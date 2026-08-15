@@ -9,6 +9,7 @@
 - Extends the GM Lifecycle Inspector with privacy-safe source-linked status.
 - Adds 57 focused compatibility scenarios plus a PF2e 8.4.0 audit, RC1 manual runtime plan, and release notes.
 - Preserves all accepted 0.4.0 lifecycle, Delay, Awaiting Roll, recovery, authority, confirmation, and Confused behavior.
+- Promoted directly to stable `v0.5.0` after automated validation; no live Foundry/Forge runtime acceptance is claimed.
 
 ## 0.4.0
 

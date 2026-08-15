@@ -1,15 +1,19 @@
-# NelTempo 0.5.0 RC1
+# NelTempo 0.5.0
 
-NelTempo 0.5.0 hardens compatibility with PF2e's native turn-timing mechanics. It verifies and repairs only a proven gap caused by phase-based combat: finite PF2e Effect items whose unique structured origin ties expiry to the source creature's next actual Start or End. Timing follows the existing NelTempo lifecycle, not phase changes or round increments.
+NelTempo 0.5.0 hardens Pathfinder 2e turn-timing compatibility under NelTempo's phase-based combat model.
 
-- Supports uniquely proven structured `source-start` and `source-end` Effect relationships.
-- Protects qualifying Effects from early world-time/native-tracker expiry, then removes the native PF2e document once at the due actual boundary.
-- Reconciles native removal (including Escape outcomes), reload, defeated/removed combatants, and combat shutdown without inventing PF2e rules.
-- Adds GM Lifecycle Inspector rows and privacy-safe source-link diagnostics.
-- Keeps standard Grabbed, Restrained, Grapple, and monster Grab native when no unique structured source exists.
-- Preserves 0.4.0 Delay, Awaiting Roll, lifecycle recovery, authority, confirmation, and Confused behavior.
-- Explicitly leaves reactions and readied actions outside NelTempo turn state.
+- PF2e remains authoritative for ordinary Start Turn and End Turn mechanics.
+- Reactions do not create NelTempo turns.
+- Ready and readied actions do not create or reopen NelTempo turns.
+- Delay remains one actual turn across Vanguard to Rearguard: one Start, no End on Delay, no second Start on resume, and one eventual End.
+- Audited PF2e Effect duration, Grapple, Grabbed, Restrained, monster Grab, Escape, reactions, Ready, and round-transition behavior.
+- Standard Grapple, Grabbed, Restrained, and monster Grab source relationships remain native because no unique structured source relationship was proven.
+- Adds compatibility handling only for uniquely structured finite Effects whose duration requires source-turn context.
+- Supports proven `source-start` and `source-end` expiration boundaries for nonnegative integer-round Effects.
+- Unrelated NelTempo phase changes cannot prematurely expire these Effects.
+- Reload preserves pending timing and does not replay completed expiration.
+- Uncertain in-flight timing fails conservatively to Review rather than guessing.
+- Primary-GM serialization prevents duplicate timing mutations.
+- Lifecycle Inspector and debug diagnostics expose concise privacy-safe timing information.
 
-PF2e continues to own Effect and Condition mechanics. NelTempo supplies only the compatibility boundary bookkeeping that PF2e's sequential tracker cannot express under free phase activation.
-
-This is prerelease metadata for eventual `v0.5.0-rc1`. No live Foundry/Forge runtime acceptance is claimed until the manual plan passes.
+PF2e continues to own generic Effect and Condition expiration. NelTempo supplies only the compatibility boundary bookkeeping that PF2e's sequential tracker cannot express under free phase activation. This direct stable promotion follows automated validation; no live Foundry/Forge runtime acceptance is claimed.

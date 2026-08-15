@@ -1,10 +1,19 @@
-# NelTempo 0.5.0 RC1
+# NelTempo 0.5.0
 
-NelTempo 0.5.0 hardens compatibility with PF2e's native turn-timing mechanics. It verifies and repairs only proven gaps caused by phase-based combat. Reactions and readied actions remain native PF2e activity and never create NelTempo turns.
+NelTempo 0.5.0 hardens Pathfinder 2e turn-timing compatibility under NelTempo's phase-based combat model.
 
-- Adds conservative structured source-start/source-end Effect compatibility tied to the existing actual-turn lifecycle.
-- Reconciles native removal, reload, combatant removal/defeat, and combat end without guessing PF2e rules.
-- Reactions and readied actions remain PF2e-native no-ops for NelTempo state.
-- Preserves stable 0.4.0 Delay, recovery, Awaiting Roll, authority, and Confused behavior.
+- PF2e remains authoritative for ordinary Start Turn and End Turn mechanics.
+- Reactions do not create NelTempo turns.
+- Ready and readied actions do not create or reopen NelTempo turns.
+- Delay remains one actual turn across Vanguard to Rearguard: one Start, no End on Delay, no second Start on resume, and one eventual End.
+- Audited PF2e Effect duration, Grapple, Grabbed, Restrained, monster Grab, Escape, reactions, Ready, and round-transition behavior.
+- Standard Grapple, Grabbed, Restrained, and monster Grab source relationships remain native because no unique structured source relationship was proven.
+- Adds compatibility handling only for uniquely structured finite Effects whose duration requires source-turn context.
+- Supports proven `source-start` and `source-end` expiration boundaries for nonnegative integer-round Effects.
+- Unrelated NelTempo phase changes cannot prematurely expire these Effects.
+- Reload preserves pending timing and does not replay completed expiration.
+- Uncertain in-flight timing fails conservatively to Review rather than guessing.
+- Primary-GM serialization prevents duplicate timing mutations.
+- Lifecycle Inspector and debug diagnostics expose concise privacy-safe timing information.
 
-This is local prerelease preparation for eventual `v0.5.0-rc1`; live Foundry/Forge acceptance is still required.
+PF2e continues to own generic Effect and Condition expiration. NelTempo supplies only the compatibility boundary bookkeeping that PF2e's sequential tracker cannot express under free phase activation. This direct stable promotion follows automated validation; no live Foundry/Forge runtime acceptance is claimed.

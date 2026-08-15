@@ -102,6 +102,6 @@ const manifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
 assert.equal(manifest.id, "nel-dynamic-initiative");
 assert.equal(manifest.title, "NelTempo");
 assert.equal(manifest.version, "0.5.0");
-assert.match(manifest.download, /\/v0\.5\.0-rc1\/dynamic-initiative\.zip$/);
+assert.match(manifest.download, /\/v0\.5\.0\/dynamic-initiative\.zip$/);
 
 console.log("Dynamic Initiative package-validate tests passed.");
