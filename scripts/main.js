@@ -1,5 +1,7 @@
 import { AUTO_ADVANCE, MODULE_ID, MODULE_TITLE, PHASE_BAR_LAYOUTS, REQUESTS, SETTINGS, SOCKET_NAME } from "./constants.js";
 import {
+  handleActivationTrackingSettingChanged,
+  reconcileActivationTimingAfterCombatantDeletion,
   reconcileLifecycleOnReady,
   reconcileTimingFromConditionHook,
   requestAction,
@@ -151,6 +153,30 @@ function registerSettings() {
     type: Boolean,
     default: true,
     restricted: true,
+    onChange: renderDock,
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.TRACK_ACTIVATION_TIME, {
+    name: "NDI.Setting.TrackActivationTime.Name",
+    hint: "NDI.Setting.TrackActivationTime.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    restricted: true,
+    onChange: (enabled) => {
+      renderDock();
+      void handleActivationTrackingSettingChanged(enabled);
+    },
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.SHOW_ACTIVATION_TIMER, {
+    name: "NDI.Setting.ShowActivationTimer.Name",
+    hint: "NDI.Setting.ShowActivationTimer.Hint",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
     onChange: renderDock,
   });
 
@@ -347,8 +373,12 @@ Hooks.on("deleteItem", (item, options) => {
   queueMicrotask(renderDock);
 });
 
-Hooks.on("deleteCombatant", () => {
-  queueMicrotask(() => void reconcileSourceLinkedCombat(getCombat(), { reason: "combatant-removed" }));
+Hooks.on("deleteCombatant", (combatant) => {
+  queueMicrotask(() => {
+    const combat = combatant?.parent ?? getCombat();
+    void reconcileActivationTimingAfterCombatantDeletion(combat);
+    void reconcileSourceLinkedCombat(combat, { reason: "combatant-removed" });
+  });
 });
 Hooks.on("updateCombatant", () => {
   queueMicrotask(() => void reconcileSourceLinkedCombat(getCombat(), { reason: "combatant-updated" }));

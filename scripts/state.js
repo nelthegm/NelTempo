@@ -19,6 +19,10 @@ import {
   normalizeSourceLinkedTiming,
   recoverInterruptedSourceLinkedTiming,
 } from "./source-linked-timing.js";
+import {
+  createActivationTiming,
+  normalizeActivationTiming,
+} from "./activation-timing.js";
 
 export const PHASES = Object.freeze({
   INITIATIVE: "initiative",
@@ -44,7 +48,7 @@ export const COMBATANT_STATE_MAPS = Object.freeze([
   "placementCorrections",
 ]);
 
-const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export function nextPhase(phase) {
   const index = PHASE_ORDER.indexOf(phase);
@@ -83,6 +87,8 @@ export function createState({ round = 1, enemyDC = 10, suggestedSkill = "percept
     countdown: null,
     /** Structured PF2e Effect relationships anchored to actual-turn boundaries. */
     sourceLinkedTiming: createSourceLinkedTiming(),
+    /** Observational real-world time spent in canonical NelTempo activations. */
+    activationTiming: createActivationTiming(),
     /**
      * One-shot GM notice after upgrading an active combat to 0.3.5 turn timing.
      * When true, show migration dialog; cleared by ACK_LIFECYCLE_MIGRATION.
@@ -231,6 +237,7 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
     placementAudit: [],
     countdown: null,
     sourceLinkedTiming: createSourceLinkedTiming(),
+    activationTiming: createActivationTiming(),
     lifecycleMigrationNotice: false,
     history: [],
   };
@@ -299,6 +306,9 @@ export function normalizeState(state, { combatantIds = null, includeHistory = tr
   next.sourceLinkedTiming = source._interruptLifecycleProcessing
     ? recoverInterruptedSourceLinkedTiming(source.sourceLinkedTiming)
     : normalizeSourceLinkedTiming(source.sourceLinkedTiming);
+  // Schema 9 and older initialize empty. Existing lifecycle/source-linked data
+  // is preserved independently and no historical activation time is fabricated.
+  next.activationTiming = normalizeActivationTiming(source.activationTiming);
 
   // Lifecycle: normalize and prune roster against current combatants.
   // Never invent a lifecycle for Initiative; preserve open/ending instances.

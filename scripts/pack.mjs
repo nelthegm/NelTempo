@@ -37,6 +37,7 @@ const INCLUDE = [
   "scripts/gm-chat.js",
   "scripts/source-linked-timing.js",
   "scripts/source-linked-timing-service.js",
+  "scripts/activation-timing.js",
   "scripts/shields.js",
   "scripts/state.js",
   "scripts/timing.js",
@@ -62,6 +63,8 @@ const INCLUDE = [
   "docs/NELTEMPO_0.5.0_PF2E_TIMING_AUDIT.md",
   "docs/NELTEMPO_0.5.0_TEST_PLAN.md",
   "docs/RELEASE_NOTES_0.5.0.md",
+  "docs/NELTEMPO_0.6.0_TEST_PLAN.md",
+  "docs/RELEASE_NOTES_0.6.0.md",
 ];
 
 function ensureIncludes() {

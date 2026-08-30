@@ -13,6 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
+**Current development version:** 0.6.0 RC1 candidate
 **Current stable version:** 0.5.0
 **Module ID:** `nel-dynamic-initiative`
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
@@ -27,12 +28,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This permanent manifest installs the current stable **NelTempo 0.5.0** release. The internal module ID remains `nel-dynamic-initiative`.
+This local implementation prepares **NelTempo 0.6.0** for eventual `v0.6.0-rc1` validation. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.5.0/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.6.0-rc1/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 
@@ -68,6 +69,12 @@ game.dynamicInitiative.start();
 Right-click any combatant portrait to open **NelTempo Combatant Controls**. Lifecycle processing actions are separate from administrative corrections: **End Turn** invokes the real PF2e end boundary, while **Mark Complete**, **Mark Skipped**, and **Mark Review** never replay PF2e mechanics. **Reopen Turn** restores only the NelTempo workflow and does not undo actor changes or permit a settled boundary to run twice.
 
 NelTempo tracks real combatant Start/End boundaries only. Reactions do not create NelTempo turns, and readied actions do not create or reopen NelTempo turns. PF2e resolves both normally without changing NelTempo lifecycle state.
+
+## Activation timing (0.6.0)
+
+When **Track Combat Activation Time** is enabled, the primary GM records wall-clock time only while a combatant is actively claimed through NelTempo. Timing is informational: it never starts or ends a PF2e turn, changes placement or eligibility, blocks advancement, or determines completion. Delay pauses timing without invoking End Turn; claiming the delayed combatant in Rearguard begins another activation session while retaining the same actual turn lifecycle.
+
+Clients may independently disable **Show Live Activation Timer** while world tracking continues. The timer updates locally about once per second without saving the Combat document on each tick. Normal NelTempo End Combat posts one public informational table containing activation count, total active time, average session time, and the encounter’s total active time. Hidden combatants use a neutral label.
 
 ## Source-linked timing (0.5.0)
 
@@ -142,6 +149,8 @@ Condition detection uses structured PF2e slugs only (`grabbed`, `restrained`, `c
 | Allow GM Advance Without Processing | World | true | Show emergency skip option |
 | Advance Completed Phases Automatically | World | Off | Off / Prompt GM / Automatic when all turns end |
 | Enforce Condition Timing | World | true | Grabbed/Restrained delay block and Confused priority gate |
+| Track Combat Activation Time | World | true | Observational activation timing and end-of-combat summary; never controls lifecycle |
+| Show Live Activation Timer | Client | true | Show the locally ticking timer beneath the active portrait |
 | NelTempo Debug Logging | Client | false | Concise state diagnostics in the browser console |
 
 Legacy **Interface Scale** (whole-dock zoom) is migrated once into Portrait Scale and Phase Bar Scale, then hidden. The stored legacy value remains for rollback.
@@ -262,6 +271,8 @@ Foundry’s `game.socket` package channel does not provide a separately authenti
 - `docs/SLICE_0_3_1_PORTRAIT_ACTIVATION.md` — portrait token activation (0.3.1)
 - `docs/SLICE_0_3_1_TEST_PLAN.md` — 0.3.1 activation verification
 - `docs/MAINTENANCE_V14_STATE_REPAIR.md` — V14 repair notes
+- `docs/NELTEMPO_0.6.0_TEST_PLAN.md` — activation timing runtime test plan
+- `docs/RELEASE_NOTES_0.6.0.md` — 0.6.0 prerelease notes
 - `docs/TEST_PLAN.md` — static, mocked, and runtime test plan
 - `docs/SLICE_0_2_1_TEST_PLAN.md` — 0.2.1 timing verification
 - `FORGE_INSTALL.md` — Forge and manual installation notes

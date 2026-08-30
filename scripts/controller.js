@@ -114,6 +114,14 @@ import {
   ensureTiming,
 } from "./timing.js";
 import {
+  activationTimingSummaryHTML,
+  markActivationSummaryPosted,
+  reconcileActivationTiming,
+  startActivationTiming,
+  stopActivationTiming,
+  stopAllActivationTiming,
+} from "./activation-timing.js";
+import {
   activePlayerOwners,
   clearNativeTurn,
   combatantIdList,
@@ -329,6 +337,54 @@ function allowAdvanceWithoutProcessing() {
   }
 }
 
+export function isActivationTrackingEnabled() {
+  try {
+    return game.settings.get(MODULE_ID, SETTINGS.TRACK_ACTIVATION_TIME) !== false;
+  } catch (_error) {
+    return true;
+  }
+}
+
+function safeActivationLabel(combatant) {
+  if (!combatant || combatant.hidden) return "Hidden Combatant";
+  return combatantName(combatant) || "Combatant";
+}
+
+function beginActivationObservation(state, combatant, now = Date.now()) {
+  const next = structuredClone(state);
+  const result = startActivationTiming(next.activationTiming, combatant?.id, {
+    now,
+    label: safeActivationLabel(combatant),
+    enabled: isActivationTrackingEnabled(),
+  });
+  next.activationTiming = result.timing;
+  return next;
+}
+
+function finishActivationObservation(state, combatantId, now = Date.now()) {
+  const next = structuredClone(state);
+  const result = stopActivationTiming(next.activationTiming, combatantId, { now });
+  next.activationTiming = result.timing;
+  return next;
+}
+
+function finishAllActivationObservations(state, now = Date.now()) {
+  const next = structuredClone(state);
+  const result = stopAllActivationTiming(next.activationTiming, { now });
+  next.activationTiming = result.timing;
+  return { state: next, changed: result.changed, stopped: result.stopped };
+}
+
+function refreshActivationSummaryLabels(state, combat) {
+  const next = structuredClone(state);
+  for (const [combatantId, record] of Object.entries(next.activationTiming?.records ?? {})) {
+    const live = getCombatant(combat, combatantId);
+    if (live) record.label = safeActivationLabel(live);
+    else if (!record.label) record.label = "Removed Combatant";
+  }
+  return next;
+}
+
 async function maybePostPhaseLifecycleSummary(combat, state, lines) {
   const mode = phaseLifecycleSummaryMode();
   if (mode === PHASE_LIFECYCLE_SUMMARY.OFF || !lines?.length) return;
@@ -524,6 +580,7 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
     if (turn.reopened) {
       const closed = markTurnEnded(next, id, { userId });
       next = closed.changed ? applyEndTurnTiming(closed.state, id) : next;
+      next = finishActivationObservation(next, id);
       await persistState(combat, next, "reopened-turn-closed");
       emitCombatantTurnEnded(combat, next, id);
       return { state: next, ok: true, reason: "settled-boundary-preserved" };
@@ -538,6 +595,7 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
     next = markCombatantEndResult(next, id, { ok: true });
     const marked = markTurnEnded(next, id, { userId });
     next = marked.changed ? applyEndTurnTiming(marked.state, id) : next;
+    next = finishActivationObservation(next, id);
     await persistState(combat, next, "combatant-end-already");
     emitCombatantTurnEnded(combat, next, id);
     return { state: next, ok: true, reason: "already-ended-this-round" };
@@ -586,6 +644,9 @@ async function processIndividualEndTurn(combat, state, combatantId, { userId = n
       next.lifecycle.status = LIFECYCLE_STATUS.COMPLETE;
     }
   }
+  // Close only after the authoritative End workflow succeeds. Failed or
+  // ambiguous native processing keeps the active segment running for review.
+  next = finishActivationObservation(next, id);
   await persistState(combat, next, "combatant-end-complete");
   emitCombatantTurnEnded(combat, next, id);
   return { state: next, ok: true, reason: null };
@@ -640,6 +701,7 @@ async function runEndBoundary(
         skipped: true,
         reason: "removed-combatant",
       });
+      next = finishActivationObservation(next, combatantId);
       await persistState(combat, next, "combatant-end-skipped");
       continue;
     }
@@ -653,6 +715,7 @@ async function runEndBoundary(
     const endRound = Number(next.round ?? combat.round);
     if (Number.isFinite(roundOfLastEnd) && roundOfLastEnd === endRound) {
       next = markCombatantEndResult(next, combatantId, { ok: true });
+      next = finishActivationObservation(next, combatantId);
       await persistState(combat, next, "combatant-end-already");
       lifecycleDiag("combatant-end-complete", combat, next, {
         combatantId: shortId(combatantId),
@@ -672,6 +735,7 @@ async function runEndBoundary(
     if (result.ok) {
       next = await processSourceLinkedBoundarySafely(combat, next, combatantId, "end");
       next = markCombatantEndResult(next, combatantId, { ok: true });
+      next = finishActivationObservation(next, combatantId);
       lifecycleDiag("combatant-end-complete", combat, next, {
         combatantId: shortId(combatantId),
         nativeMethod: result.nativeMethod,
@@ -910,6 +974,14 @@ async function transitionToPhase(combat, state, targetPhase, options = {}) {
         } else if (state.phase === PHASES.ENEMY && targetPhase !== PHASES.ENEMY) {
           next = await expireDueRaisedShields(combat, next);
         }
+
+        // An approved phase leave cannot carry a running observational timer
+        // into waiting time. This does not settle or fabricate lifecycle work.
+        const closedTiming = finishAllActivationObservations(next);
+        next = closedTiming.state;
+        if (closedTiming.changed) {
+          await persistState(combat, next, "phase-activation-timing-closed");
+        }
       }
 
       // Enter next phase.
@@ -1140,8 +1212,11 @@ async function claimTurn(combat, state, payload, requestUser) {
   }
   if (state.phase === PHASES.ENEMY && !requestUser.isGM) throw new Error(localize("NDI.Error.GmOnlyEnemies"));
 
-  const next = withHistory(state, `Activate ${combatantName(combatant)}`);
+  let next = withHistory(state, `Activate ${combatantName(combatant)}`);
   next.activeCombatantId = combatant.id;
+  // Canonical claim/activation is the sole timer start seam. Phase entry,
+  // portrait token selection, reactions, Ready, and placement never call this.
+  next = beginActivationObservation(next, combatant);
   await persistState(combat, next, "claim-turn");
   // Native turn marker only (turnEvents suppressed) — lifecycle already ran at phase start.
   await setNativeTurn(combat, combatant.id);
@@ -1260,7 +1335,8 @@ async function endTurn(combat, state, payload, requestUser) {
   }
 
   // Initiative / legacy fallback: mark acted only.
-  const next = markActed(state, combatant.id, true);
+  let next = markActed(state, combatant.id, true);
+  next = finishActivationObservation(next, combatant.id);
   await persistState(combat, next, "end-turn");
   await clearNativeTurn(combat);
 }
@@ -1507,6 +1583,9 @@ async function skipFailedEndHandler(combat, state) {
     "failed-end-skipped",
     [SOURCE_LINK_BOUNDARY.SOURCE_END, SOURCE_LINK_BOUNDARY.TARGET_END],
   );
+  for (const combatantId of failedIds) {
+    next = finishActivationObservation(next, combatantId);
+  }
   const pending = endCandidates(next.lifecycle);
   if (pending.length === 0) {
     next = completeEndBoundary(next, { error: false });
@@ -1627,6 +1706,9 @@ async function delayCombatant(combat, state, payload, requestUser) {
     next.lifecycle.timing = markPriorityResolved(next.lifecycle.timing, combatant.id);
     next.lifecycle.timing = recomputePriorityGate(next.lifecycle.timing, next.lifecycle);
   }
+  // Delay pauses observation only. It does not claim or invoke End Turn; the
+  // Rearguard claim starts a new activation session for the same actual turn.
+  next = finishActivationObservation(next, combatant.id);
   await persistState(combat, next, "delay-rearguard");
   await clearNativeTurn(combat);
   if (next.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
@@ -1649,6 +1731,7 @@ async function markCombatantActed(combat, state, payload, requestUser) {
         combatant.id,
         { userId: requestUser.id, reason: "marked-skipped" },
       );
+      result.state = finishActivationObservation(result.state, combatant.id);
       await persistState(combat, result.state, "mark-skipped");
       if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
         await maybeAutoAdvance(combat, result.state);
@@ -1662,7 +1745,8 @@ async function markCombatantActed(combat, state, payload, requestUser) {
     return;
   }
 
-  const next = markActed(state, combatant.id, payload.acted !== false);
+  let next = markActed(state, combatant.id, payload.acted !== false);
+  if (payload.acted !== false) next = finishActivationObservation(next, combatant.id);
   await persistState(combat, next, "mark-acted");
   if (next.activeCombatantId == null) await clearNativeTurn(combat);
 }
@@ -1713,6 +1797,20 @@ async function undo(combat, state) {
       revision: String(state.revision ?? 0),
     });
   }
+  // Gameplay undo is state-only and must not erase observational history.
+  // Reconcile a running segment against the restored canonical active actor.
+  const restoredActiveId = toPersist.activeCombatantId == null
+    ? null
+    : String(toPersist.activeCombatantId);
+  const restoredTurn = restoredActiveId ? toPersist.lifecycle?.turns?.[restoredActiveId] : null;
+  const restoredProvesActive = Boolean(
+    restoredActiveId && restoredTurn && !restoredTurn.ended && !restoredTurn.skipped,
+  );
+  const reconciledTiming = reconcileActivationTiming(state.activationTiming, {
+    activeCombatantId: restoredProvesActive ? restoredActiveId : null,
+    trackingEnabled: isActivationTrackingEnabled(),
+  });
+  toPersist.activationTiming = reconciledTiming.timing;
   const saved = await persistState(combat, toPersist, "undo");
   await mustUpdateCombat(combat, { round: restored.round, turn: null });
   if (restored.activeCombatantId) await setNativeTurn(combat, restored.activeCombatantId);
@@ -1727,9 +1825,33 @@ async function undo(combat, state) {
 }
 
 async function endDynamicCombat(combat, state) {
-  await releaseSourceLinkedEffects(combat, state);
-  const cleaned = await clearManagedRaisedShields(combat, state);
-  const next = foundry.utils.deepClone(cleaned ?? state);
+  let timingState = getState(combat) ?? state;
+  const finalized = finishAllActivationObservations(timingState);
+  timingState = refreshActivationSummaryLabels(finalized.state, combat);
+  const shouldPostTiming =
+    isActivationTrackingEnabled() && !timingState.activationTiming?.summaryPosted;
+
+  if (shouldPostTiming) {
+    const marked = markActivationSummaryPosted(timingState.activationTiming);
+    timingState.activationTiming = marked.timing;
+    // Persist the exactly-once claim before public emission so multiple GM
+    // clients or a repeated End request cannot duplicate the timing card.
+    await persistState(combat, timingState, "combat-timing-summary-claimed");
+    try {
+      await publicChat(activationTimingSummaryHTML(timingState.activationTiming));
+    } catch (error) {
+      console.error(`${MODULE_ID} | combat timing summary failed`, {
+        combatId: shortId(combat.id),
+        reason: error?.message ?? "summary-failed",
+      });
+    }
+  } else if (finalized.changed) {
+    await persistState(combat, timingState, "combat-timing-finalized");
+  }
+
+  await releaseSourceLinkedEffects(combat, timingState);
+  const cleaned = await clearManagedRaisedShields(combat, timingState);
+  const next = foundry.utils.deepClone(cleaned ?? timingState);
   next.enabled = false;
   next.lifecycle = null;
   try {
@@ -2029,6 +2151,7 @@ async function markCombatantComplete(combat, state, payload, requestUser) {
       reason: "administrative-complete",
     },
   );
+  result.state = finishActivationObservation(result.state, combatant.id);
   await persistState(combat, result.state, "mark-turn-complete");
   await clearNativeTurn(combat);
   if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
@@ -2055,6 +2178,7 @@ async function markCombatantSkipped(combat, state, payload, requestUser) {
       reason: "administrative-skip",
     },
   );
+  result.state = finishActivationObservation(result.state, combatant.id);
   await persistState(combat, result.state, "mark-turn-skipped");
   await clearNativeTurn(combat);
   if (result.state.lifecycle?.status === LIFECYCLE_STATUS.COMPLETE) {
@@ -2080,6 +2204,7 @@ async function markCombatantReview(combat, state, payload, requestUser) {
       reason: "administrative-review",
     },
   );
+  result.state = finishActivationObservation(result.state, combatant.id);
   await persistState(combat, result.state, "mark-lifecycle-review");
   return result.state;
 }
@@ -2222,6 +2347,9 @@ async function placementApply(combat, state, payload, requestUser) {
     next.lifecycle.phaseInstanceId = phaseInstanceBefore;
   }
 
+  // Placement is administrative and never starts timing. If it removes the
+  // currently operated combatant from active workflow, retain and close time.
+  next = finishActivationObservation(next, combatant.id);
   await persistState(combat, next, "placement-apply");
   notify("info", localize("NDI.Placement.CorrectionApplied"));
 }
@@ -2522,6 +2650,40 @@ export function partyRollRecipients(combat) {
   return recipients;
 }
 
+/** Finalize running observations when the world setting is turned off. */
+export async function handleActivationTrackingSettingChanged(enabled) {
+  if (enabled !== false || !isPrimaryGM()) return;
+  const combat = getCombat();
+  if (!combat) return;
+  return runCombatMutation(combat.id, async () => {
+    const state = getState(combat);
+    if (!state?.enabled) return;
+    const finalized = finishAllActivationObservations(state);
+    if (finalized.changed) {
+      await persistState(combat, finalized.state, "activation-timing-disabled");
+    }
+  });
+}
+
+/** Close a stale active segment after its Combatant document is removed. */
+export async function reconcileActivationTimingAfterCombatantDeletion(combat = getCombat()) {
+  if (!isPrimaryGM() || !combat) return;
+  return runCombatMutation(combat.id, async () => {
+    const state = getState(combat);
+    if (!state?.enabled) return;
+    const activeId = state.activeCombatantId == null ? null : String(state.activeCombatantId);
+    const liveActive = activeId && getCombatant(combat, activeId) ? activeId : null;
+    const result = reconcileActivationTiming(state.activationTiming, {
+      activeCombatantId: liveActive,
+      trackingEnabled: isActivationTrackingEnabled(),
+    });
+    if (!result.changed) return;
+    const next = structuredClone(state);
+    next.activationTiming = result.timing;
+    await persistState(combat, next, "activation-timing-combatant-removed");
+  });
+}
+
 /**
  * On ready/reload: convert uncertain Processing lifecycle entries to interrupted,
  * then reconcile live condition timing without replaying boundaries.
@@ -2529,8 +2691,31 @@ export function partyRollRecipients(combat) {
 export async function reconcileLifecycleOnReady() {
   if (!isPrimaryGM()) return;
   const combat = getCombat();
-  const state = getState(combat);
-  if (!combat || !state?.enabled || !state.lifecycle) return;
+  let state = getState(combat);
+  if (!combat || !state?.enabled) return;
+
+  const activeId = state.activeCombatantId == null ? null : String(state.activeCombatantId);
+  const activeTurn = activeId ? state.lifecycle?.turns?.[activeId] : null;
+  const workflowProvesActive = Boolean(
+    activeId &&
+    state.lifecycle &&
+    [LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(state.lifecycle.status) &&
+    activeTurn &&
+    !activeTurn.ended &&
+    !activeTurn.skipped,
+  );
+  const timingReconciled = reconcileActivationTiming(state.activationTiming, {
+    activeCombatantId: workflowProvesActive ? activeId : null,
+    trackingEnabled: isActivationTrackingEnabled(),
+  });
+  if (timingReconciled.changed) {
+    const next = structuredClone(state);
+    next.activationTiming = timingReconciled.timing;
+    await persistState(combat, next, "activation-timing-reload-reconcile");
+    state = next;
+  }
+
+  if (!state.lifecycle) return;
 
   const lc = state.lifecycle;
   const uncertain =

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- Adds observational real-world timing for canonical NelTempo activation sessions.
+- Starts timing only when a PC or NPC is claimed through the existing activation workflow; phase entry, portrait token selection, reactions, Ready, and placement do not start it.
+- Pauses timing on Delay and resumes as a new session when the same actual turn is claimed in Rearguard, without changing one-Start/one-End lifecycle behavior.
+- Finalizes timers idempotently on successful End Turn, administrative resolution, lane removal, phase leave, tracking disable, and combat end.
+- Adds a single client-local one-second dock ticker with accessible duration text and no per-second document persistence.
+- Adds one primary-GM public end-of-combat timing summary with safe labels, session totals, averages, and a grand total.
+- Migrates durable combat state from schema 9 to schema 10 with empty timing records while preserving lifecycle and source-linked timing.
+- Adds 45 focused activation-timing scenarios and a Foundry/PF2e manual test plan.
+
 ## 0.5.0
 
 - Adds a narrow source-linked timing bridge for finite PF2e Effects with a unique structured origin and source-turn expiry.

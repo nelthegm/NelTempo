@@ -36,7 +36,7 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
 
 ```js
 {
-  schema: 9,                 // document schema version
+  schema: 10,                // document schema version
   revision: 0,               // increments on successful state writes only
   enabled: true,
   phase: "initiative" | "vanguard" | "enemy" | "rearguard",
@@ -57,6 +57,10 @@ Actor-side memory is limited to optional `flags.nel-dynamic-initiative.lastIniti
   placements: {},                  // GM placement overrides (0.3.0)
   placementCorrections: {},        // next-round queue (0.3.0)
   placementAudit: [],              // capped placement audit (0.3.0)
+  activationTiming: {              // observational activation sessions (0.6.0)
+    records: { [combatantId]: { totalMs, activationCount, activeSince, label } },
+    summaryPosted: false
+  },
   history: [{ label, at, state }]  // undo stack; nested states have empty history
 }
 ```
@@ -78,6 +82,8 @@ Schema **5** (0.3.2) adds optional `countdown: { label, triggerRound, createdRou
 Schema **8** (0.4.0 repair) makes Delay an explicit lifecycle hand-off. A `DelayedTurnSnapshot` records the same round and actual-turn id, Vanguard phase instance, intentional Rearguard resume lane, and claimed/processed Start and End boundaries. Vanguard transfers the open turn out of its roster without settling End; Rearguard hydrates the snapshot into its own lifecycle turn record. Administrative placement never creates this snapshot.
 
 Schema **9** adds a top-level source-linked timing registry. It references PF2e Effect documents and the existing actual-turn identity; it does not create a parallel condition lifecycle. Pending/Processing state supports exactly-once source Start/End processing, while interrupted or ambiguous entries become Review and fail open.
+
+Schema **10** adds top-level observational `activationTiming`. `activeSince` is an authoritative primary-GM epoch timestamp, and completed segments accumulate into `totalMs`; `activationCount` counts canonical claim/resume sessions. No interval writes state. Removed-combatant records remain long enough for the final summary and retain only a short safe label snapshot. Migration from schema 9 initializes an empty registry without fabricating time or changing lifecycle/source-linked state.
 
 See `docs/SLICE_0_2_0_PHASE_LIFECYCLE.md` for the full lifecycle model, PF2e adapter pathway, and Undo limitations.
 
@@ -104,7 +110,7 @@ Combatant identity is always the Foundry **combatant document id**, never displa
 1. Clones input (does not mutate callers).
 2. Builds a new plain object with supported fields only.
 3. Drops non-serializable values (functions, class instances, `undefined`, non-finite numbers).
-4. When `combatantIds` is provided, removes combatant-keyed entries not in that set from `results`, `acted`, `delayed`, and `lastSkills`.
+4. When `combatantIds` is provided, removes combatant-keyed entries not in that set from `results`, `acted`, `delayed`, and `lastSkills`. Activation timing records are intentionally retained for removed-combatant summary history.
 5. Clears `activeCombatantId` if that combatant is gone.
 6. Prunes shield entries tied to missing combatants.
 7. Optionally normalizes undo history snapshots the same way.

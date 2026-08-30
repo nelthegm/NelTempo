@@ -3,6 +3,24 @@
   box-sizing: border-box;
 }
 
+.ndi-combat-timing-summary table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ndi-combat-timing-summary th,
+.ndi-combat-timing-summary td {
+  padding: 3px 5px;
+  text-align: left;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+.ndi-combat-timing-summary th:not(:first-child),
+.ndi-combat-timing-summary td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .ndi-native-tracker-hidden,
 body.ndi-suppress-native-tracker #combat-tracker,
 body.ndi-suppress-native-tracker .combat-tracker {
@@ -338,6 +356,23 @@ body.ndi-suppress-native-tracker .combat-tracker {
   height: 100%;
   object-fit: cover;
   object-position: center;
+}
+
+.ndi-activation-timer {
+  align-self: center;
+  min-width: 3.2em;
+  margin-top: 1px;
+  padding: 1px 5px;
+  border: 1px solid rgba(214, 166, 42, 0.5);
+  border-radius: 999px;
+  color: #f4e4ad;
+  background: rgba(12, 10, 14, 0.78);
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .ndi-result-badge {

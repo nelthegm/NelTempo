@@ -28,6 +28,11 @@ import {
 } from "./presentation.js";
 import { PHASES, combatantPhase, nextPhase, phaseForResult, resultForCurrentRound } from "./state.js";
 import { sourceLinkedInspection } from "./source-linked-timing.js";
+import {
+  activationDurationMs,
+  formatActivationDuration,
+  formatActivationDurationAria,
+} from "./activation-timing.js";
 import { isTimingEnforced } from "./timing-service.js";
 import {
   evaluateDelayEligibility,
@@ -59,6 +64,53 @@ const MODAL_CLASS = "ndi-initiative-modal";
 const DRAG_KEY = `${MODULE_ID}.dock-position`;
 const openPromptIds = new Set();
 let overflowMenuCloser = null;
+let activationTimerInterval = null;
+
+function activationTimerPresentationEnabled() {
+  try {
+    return (
+      game.settings.get(MODULE_ID, SETTINGS.TRACK_ACTIVATION_TIME) !== false &&
+      game.settings.get(MODULE_ID, SETTINGS.SHOW_ACTIVATION_TIMER) !== false
+    );
+  } catch (_error) {
+    return true;
+  }
+}
+
+export function stopActivationTimerTicker() {
+  if (activationTimerInterval != null) clearInterval(activationTimerInterval);
+  activationTimerInterval = null;
+}
+
+export function activationTimerTickerRunningForTests() {
+  return activationTimerInterval != null;
+}
+
+function updateActivationTimerElements(root, now = Date.now()) {
+  const timers = [...(root?.querySelectorAll?.(".ndi-activation-timer[data-active-since]") ?? [])];
+  for (const timer of timers) {
+    const record = {
+      totalMs: Number(timer.dataset.totalMs),
+      activationCount: 1,
+      activeSince: Number(timer.dataset.activeSince),
+    };
+    const duration = activationDurationMs(record, now);
+    timer.textContent = formatActivationDuration(duration);
+    timer.setAttribute("aria-label", formatActivationDurationAria(duration));
+  }
+  return timers.length;
+}
+
+function syncActivationTimerTicker(root) {
+  stopActivationTimerTicker();
+  if (!activationTimerPresentationEnabled()) return;
+  if (updateActivationTimerElements(root) === 0) return;
+  activationTimerInterval = setInterval(() => {
+    if (!document.getElementById(DOCK_ID) || updateActivationTimerElements(root) === 0) {
+      stopActivationTimerTicker();
+    }
+  }, 1000);
+}
 
 function t(key, data) {
   try {
@@ -353,6 +405,21 @@ function portraitHTML(combatant, state) {
     ? `<span class="ndi-ended-badge" aria-hidden="true"><i class="fa-solid fa-check"></i></span>`
     : "";
   const lifecyclePip = lifecycleStatusPip(combatant, state);
+  const activationRecord = state.activationTiming?.records?.[combatant.id];
+  const activationActiveSince = Number(activationRecord?.activeSince);
+  const showActivationTimer = Boolean(
+    activationTimerPresentationEnabled() &&
+    state.activeCombatantId === combatant.id &&
+    activationRecord?.activeSince != null &&
+    Number.isFinite(activationActiveSince) &&
+    activationActiveSince >= 0,
+  );
+  const activationTimer = showActivationTimer
+    ? (() => {
+        const duration = activationDurationMs(activationRecord);
+        return `<span class="ndi-activation-timer" role="timer" aria-live="off" aria-label="${escapeHTML(formatActivationDurationAria(duration))}" data-total-ms="${Number(activationRecord.totalMs) || 0}" data-active-since="${activationActiveSince}">${escapeHTML(formatActivationDuration(duration))}</span>`;
+      })()
+    : "";
 
   const badgeKey = timingBadgeFor(state.lifecycle, combatant.id, { enforce: isTimingEnforced() });
   const showOverlay = isPortraitOverlayBadge(badgeKey);
@@ -419,6 +486,7 @@ function portraitHTML(combatant, state) {
         ${timingBadge}
         ${isLocallyControlledCombatant(combatant) ? `<span class="ndi-token-selected" title="${escapeHTML(t("NDI.Portrait.TokenSelected"))}" aria-label="${escapeHTML(t("NDI.Portrait.TokenSelected"))}"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></span>` : ""}
       </span>
+      ${activationTimer}
       <span class="ndi-name">${escapeHTML(combatantName(combatant))}</span>
       <span class="ndi-status">${escapeHTML(statusFor(combatant, state))}</span>
     </button>
@@ -1699,6 +1767,7 @@ async function openCountdownEditor(state) {
 }
 
 export function renderDock() {
+  stopActivationTimerTicker();
   document.getElementById(DOCK_ID)?.remove();
   document.getElementById(LAUNCHER_ID)?.remove();
   if (overflowMenuCloser) {
@@ -1739,6 +1808,7 @@ export function renderDock() {
   restoreDockPosition(root);
   enableDrag(root);
   bindDockEvents(root, combat, state);
+  syncActivationTimerTicker(root);
   updateOpenPromptDC(state.enemyDC);
 }
 
@@ -1892,6 +1962,7 @@ export function handleInitiativePrompt(prompt) {
 }
 
 export function removeUI() {
+  stopActivationTimerTicker();
   document.getElementById(DOCK_ID)?.remove();
   document.getElementById(LAUNCHER_ID)?.remove();
   document.querySelectorAll(`.${MODAL_CLASS}`).forEach((element) => element.remove());

@@ -165,6 +165,11 @@
   "NDI.Setting.EnforceConditionTiming.Name": "Enforce Condition Timing",
   "NDI.Setting.EnforceConditionTiming.Hint": "When On, Grabbed and Restrained block voluntary Delay, and Confused combatants must resolve before others in the same phase. When Off, lifecycle and End Turn remain fully functional without timing restrictions.",
 
+  "NDI.Setting.TrackActivationTime.Name": "Track Combat Activation Time",
+  "NDI.Setting.TrackActivationTime.Hint": "Record informational wall-clock time only while a combatant is actively operated through NelTempo. Timing never controls turn lifecycle or PF2e mechanics.",
+  "NDI.Setting.ShowActivationTimer.Name": "Show Live Activation Timer",
+  "NDI.Setting.ShowActivationTimer.Hint": "Show a locally updating timer beneath the active combatant portrait. Turning this off does not disable world timing or the combat summary.",
+
   "NDI.Notify.SelectTokens": "Select the tokens that belong in the encounter, then start NelTempo again.",
   "NDI.Notify.AlreadyActive": "NelTempo is already active for this encounter.",
   "NDI.Notify.PromptOnlyInitiative": "Initiative can only be prompted during the Initiative phase.",

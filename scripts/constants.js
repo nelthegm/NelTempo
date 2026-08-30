@@ -14,6 +14,10 @@ export const SETTINGS = Object.freeze({
   AUTO_ADVANCE_PHASE: "autoAdvancePhase",
   /** Enforce Grabbed/Restrained/Confused timing restrictions */
   ENFORCE_CONDITION_TIMING: "enforceConditionTiming",
+  /** World: observe real-world time spent in canonical NelTempo activations. */
+  TRACK_ACTIVATION_TIME: "trackActivationTime",
+  /** Client: show the locally ticking timer beneath an active portrait. */
+  SHOW_ACTIVATION_TIMER: "showActivationTimer",
   /** Client: pan camera when activating a portrait token */
   PAN_CAMERA_ON_PORTRAIT: "panCameraOnPortraitActivation",
   /**

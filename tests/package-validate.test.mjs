@@ -31,6 +31,7 @@ for (const file of [
   "scripts/gm-chat.js",
   "scripts/source-linked-timing.js",
   "scripts/source-linked-timing-service.js",
+  "scripts/activation-timing.js",
 ]) {
   execFileSync(process.execPath, ["--check", join(root, file)], { stdio: "pipe" });
 }
@@ -79,6 +80,9 @@ if (existsSync(zipPath)) {
   assert.ok(entries.includes("docs/NELTEMPO_0.5.0_TEST_PLAN.md"), "ZIP includes 0.5.0 runtime plan");
   assert.ok(entries.includes("docs/NELTEMPO_0.5.0_PF2E_TIMING_AUDIT.md"), "ZIP includes PF2e timing audit");
   assert.ok(entries.includes("docs/RELEASE_NOTES_0.5.0.md"), "ZIP includes 0.5.0 release notes");
+  assert.ok(entries.includes("docs/NELTEMPO_0.6.0_TEST_PLAN.md"), "ZIP includes 0.6.0 runtime plan");
+  assert.ok(entries.includes("docs/RELEASE_NOTES_0.6.0.md"), "ZIP includes 0.6.0 release notes");
+  assert.ok(entries.includes("scripts/activation-timing.js"), "ZIP includes activation timing helper");
   assert.equal(entries.some((e) => e.startsWith(".git")), false);
   assert.equal(entries.some((e) => e.startsWith("tests/")), false);
   assert.equal(entries.some((e) => e.startsWith("node_modules/")), false);
@@ -95,13 +99,13 @@ if (existsSync(zipPath)) {
 
 // package.json test script exists
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-assert.equal(pkg.version, "0.5.0");
+assert.equal(pkg.version, "0.6.0");
 assert.ok(pkg.scripts?.test);
 assert.ok(pkg.scripts?.check);
 const manifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
 assert.equal(manifest.id, "nel-dynamic-initiative");
 assert.equal(manifest.title, "NelTempo");
-assert.equal(manifest.version, "0.5.0");
-assert.match(manifest.download, /\/v0\.5\.0\/dynamic-initiative\.zip$/);
+assert.equal(manifest.version, "0.6.0");
+assert.match(manifest.download, /\/v0\.6\.0-rc1\/dynamic-initiative\.zip$/);
 
 console.log("Dynamic Initiative package-validate tests passed.");
