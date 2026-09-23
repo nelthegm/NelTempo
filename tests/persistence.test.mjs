@@ -25,7 +25,7 @@ assert.ok(Array.isArray(moduleJson.esmodules));
 assert.ok(moduleJson.esmodules.includes("scripts/main.js"));
 assert.equal(
   moduleJson.download,
-  "https://github.com/nelthegm/NelTempo/releases/download/v0.6.0-rc1/dynamic-initiative.zip",
+  "https://github.com/nelthegm/NelTempo/releases/download/v0.6.0-rc2/dynamic-initiative.zip",
 );
 assert.equal(moduleJson.manifest, "https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json");
 
@@ -105,13 +105,41 @@ const results = await Promise.all([p1, p2]);
 assert.deepEqual(results, [1, 2]);
 assert.deepEqual(order, ["start-1", "end-1", "start-2", "end-2"]);
 
-// 7. Re-entrant mutation does not deadlock
-const reentrant = await runCombatMutation("c2", async () => {
-  const inner = await runCombatMutation("c2", async () => "inner");
-  return `outer:${inner}`;
-});
-assert.equal(reentrant, "outer:inner");
+// 7. Concurrent call that arrives mid-await waits (does not race / nest)
+{
+  const order = [];
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const midAwait = runCombatMutation("c2", async () => {
+    order.push("a-start");
+    await gate;
+    order.push("a-end");
+    return "a";
+  });
+  // Let the first mutation reach its await before scheduling the second.
+  await Promise.resolve();
+  await Promise.resolve();
+  const latecomer = runCombatMutation("c2", async () => {
+    order.push("b-start");
+    order.push("b-end");
+    return "b";
+  });
+  release();
+  const midResults = await Promise.all([midAwait, latecomer]);
+  assert.deepEqual(midResults, ["a", "b"]);
+  assert.deepEqual(order, ["a-start", "a-end", "b-start", "b-end"]);
+}
 
+// 7b. saveState no longer nests runCombatMutation (avoids the mid-await race)
+{
+  const utilsSource = read("scripts/utils.js");
+  const saveStart = utilsSource.indexOf("export async function saveState");
+  const saveEnd = utilsSource.indexOf("export async function resetPartyNativeInitiative");
+  const saveBody = utilsSource.slice(saveStart, saveEnd);
+  assert.equal(saveBody.includes("runCombatMutation"), false);
+}
 // 8. Different combats can proceed independently (queued separately)
 const multi = [];
 await Promise.all([

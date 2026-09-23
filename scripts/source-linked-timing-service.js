@@ -410,11 +410,15 @@ export async function reconcileSourceLinkedItemDeletion(item, options = {}) {
 }
 
 /** Reload/removal reconciliation. Missing combatants restore native duration before pruning. */
-export async function reconcileSourceLinkedCombat(combat = getCombat(), { reason = "reconcile" } = {}) {
+export async function reconcileSourceLinkedCombat(
+  combat = getCombat(),
+  { reason = "reconcile", alreadyQueued = false } = {},
+) {
   if (!combat || !isPrimaryGM()) return { changed: false, reason: "not-authority" };
   const state = getState(combat);
   if (!state?.enabled) return { changed: false, reason: "inactive" };
-  return runCombatMutation(combat.id, async () => {
+
+  const work = async () => {
     let next = structuredClone(getState(combat) ?? state);
     let timing = recoverInterruptedSourceLinkedTiming(
       next.sourceLinkedTiming ?? createSourceLinkedTiming(),
@@ -476,7 +480,10 @@ export async function reconcileSourceLinkedCombat(combat = getCombat(), { reason
     next = await persistSourceLinkedState(combat, next, "source-link-reconciled");
     sourceLinkDiag("source-link-reconciled", combat, next, { reason });
     return { changed: true, reason };
-  });
+  };
+
+  if (alreadyQueued) return work();
+  return runCombatMutation(combat.id, work);
 }
 
 /** Restore protected native durations when NelTempo combat ends. */

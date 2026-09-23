@@ -10,6 +10,9 @@
 - Adds one primary-GM public end-of-combat timing summary with safe labels, session totals, averages, and a grand total.
 - Migrates durable combat state from schema 9 to schema 10 with empty timing records while preserving lifecycle and source-linked timing.
 - Adds 45 focused activation-timing scenarios and a Foundry/PF2e manual test plan.
+- Fixes concurrent initiative submissions overwriting each other when players roll at the same time (mutation queue no longer nests mid-await).
+- Allows free portrait activation switching: clicking another eligible portrait pauses the prior timer and activates the new combatant without ending their turn.
+- Manifest prepared for `v0.6.0-rc2`.
 
 ## 0.5.0
 

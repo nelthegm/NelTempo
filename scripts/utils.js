@@ -6,8 +6,6 @@ import {
 
 /** @type {Map<string, Promise<unknown>>} */
 const combatMutationChains = new Map();
-/** @type {Map<string, number>} */
-const combatMutationDepth = new Map();
 
 export function debug(...args) {
   try {
@@ -60,25 +58,17 @@ export function combatantIdList(combat) {
 }
 
 /**
- * Serialize mutations for a combat so rapid UI clicks cannot overlap writes.
- * Re-entrant: nested calls for the same combat run inline (no deadlock with saveState).
+ * Serialize mutations for a combat so rapid UI clicks / socket requests cannot
+ * overlap writes — including while a prior mutation is mid-await.
+ *
+ * Nested `saveState` must NOT call this again (that previously used a depth
+ * bypass which let concurrent socket rolls race). Callers that need ordering
+ * wrap their work in `runCombatMutation`; `saveState` persists directly.
  */
 export function runCombatMutation(combatId, task) {
   const key = String(combatId ?? "__none__");
-  const depth = combatMutationDepth.get(key) ?? 0;
-  if (depth > 0) return Promise.resolve().then(task);
-
   const previous = combatMutationChains.get(key) ?? Promise.resolve();
-  const run = previous.catch(() => undefined).then(async () => {
-    combatMutationDepth.set(key, (combatMutationDepth.get(key) ?? 0) + 1);
-    try {
-      return await task();
-    } finally {
-      const nextDepth = (combatMutationDepth.get(key) ?? 1) - 1;
-      if (nextDepth <= 0) combatMutationDepth.delete(key);
-      else combatMutationDepth.set(key, nextDepth);
-    }
-  });
+  const run = previous.catch(() => undefined).then(() => task());
 
   const tracked = run.catch(() => undefined).finally(() => {
     if (combatMutationChains.get(key) === tracked) combatMutationChains.delete(key);
@@ -210,6 +200,12 @@ export async function safeCombatUpdate(combat, changes, options = {}) {
  *
  * @returns {Promise<{ok: boolean, combatId: string|null, revision: number|null, reason: string|null, error: Error|null}>}
  */
+/**
+ * Persist module state to the Combat document.
+ * Does not acquire the mutation queue — callers that need serialization must
+ * wrap work in `runCombatMutation` (e.g. `handleGMRequest`). Nesting
+ * `saveState` inside that queue used to bypass it and race concurrent rolls.
+ */
 export async function saveState(combat, state, { reason = "state-save" } = {}) {
   if (!combat?.id) {
     return {
@@ -221,143 +217,141 @@ export async function saveState(combat, state, { reason = "state-save" } = {}) {
     };
   }
 
-  return runCombatMutation(combat.id, async () => {
-    const live = game.combats?.get?.(combat.id) ?? combat;
-    if (!live || live.id !== combat.id) {
-      diag("state-update-failed", {
-        combatId: shortId(combat.id),
-        reason: "combat-missing",
-      });
-      return {
-        ok: false,
-        combatId: combat.id,
-        revision: null,
-        reason: "combat-missing",
-        error: new Error("The combat encounter no longer exists."),
-      };
-    }
-
-    if (!game.user?.isGM) {
-      diag("state-update-failed", {
-        combatId: shortId(live.id),
-        reason: "not-gm",
-        userId: shortId(game.user?.id),
-      });
-      return {
-        ok: false,
-        combatId: live.id,
-        revision: null,
-        reason: "not-gm",
-        error: new Error("Only a GM can update Dynamic Initiative combat state."),
-      };
-    }
-
-    const previous = getState(live);
-    const previousRevision = Math.max(0, Number(previous?.revision ?? 0) || 0);
-    const combatantIds = combatantIdList(live);
-
-    let normalized;
-    try {
-      normalized = normalizeState(state, { combatantIds, includeHistory: true });
-    } catch (error) {
-      diag("state-update-failed", {
-        combatId: shortId(live.id),
-        reason: "normalize-failed",
-      });
-      console.error(`${MODULE_ID} | state normalization failed`, {
-        combatId: shortId(live.id),
-        reason: error?.message ?? "normalize-failed",
-      });
-      return {
-        ok: false,
-        combatId: live.id,
-        revision: previousRevision,
-        reason: "normalize-failed",
-        error,
-      };
-    }
-
-    const pruned = countPrunedCombatantEntries(state, normalized);
-    normalized.revision = previousRevision + 1;
-
-    diag("state-normalized", {
-      combatId: shortId(live.id),
-      phase: normalized.phase,
-      revision: normalized.revision,
-      combatants: combatantIds.length,
-      pruned,
-      reason,
+  const live = game.combats?.get?.(combat.id) ?? combat;
+  if (!live || live.id !== combat.id) {
+    diag("state-update-failed", {
+      combatId: shortId(combat.id),
+      reason: "combat-missing",
     });
-
-    if (pruned > 0) {
-      diag("combatant-state-pruned", {
-        combatId: shortId(live.id),
-        pruned,
-        combatants: combatantIds.length,
-        revision: normalized.revision,
-      });
-    }
-
-    diag("state-update-queued", {
-      combatId: shortId(live.id),
-      phase: normalized.phase,
-      revision: normalized.revision,
-      reason,
-    });
-
-    diag("state-update-started", {
-      combatId: shortId(live.id),
-      phase: normalized.phase,
-      revision: normalized.revision,
-      reason,
-    });
-
-    const changes = buildCompleteStateUpdate(normalized);
-    const updateResult = await safeCombatUpdate(live, changes);
-    if (!updateResult.ok) {
-      diag("state-update-failed", {
-        combatId: shortId(live.id),
-        phase: normalized.phase,
-        revision: previousRevision,
-        reason: updateResult.reason,
-      });
-      return {
-        ok: false,
-        combatId: live.id,
-        revision: previousRevision,
-        reason: updateResult.reason,
-        error: updateResult.error,
-      };
-    }
-
-    const stored = getState(live);
-    const storedRevision = Number(stored?.revision ?? NaN);
-    if (Number.isFinite(storedRevision) && storedRevision !== normalized.revision) {
-      // Another writer may have interleaved outside our queue; report mismatch.
-      diag("state-update-stale", {
-        combatId: shortId(live.id),
-        revision: storedRevision,
-        expected: normalized.revision,
-      });
-    }
-
-    diag("state-update-complete", {
-      combatId: shortId(live.id),
-      phase: normalized.phase,
-      revision: normalized.revision,
-      combatants: combatantIds.length,
-      pruned,
-      reason,
-    });
-
     return {
-      ok: true,
-      combatId: live.id,
-      revision: normalized.revision,
-      reason: null,
-      error: null,
+      ok: false,
+      combatId: combat.id,
+      revision: null,
+      reason: "combat-missing",
+      error: new Error("The combat encounter no longer exists."),
     };
+  }
+
+  if (!game.user?.isGM) {
+    diag("state-update-failed", {
+      combatId: shortId(live.id),
+      reason: "not-gm",
+      userId: shortId(game.user?.id),
+    });
+    return {
+      ok: false,
+      combatId: live.id,
+      revision: null,
+      reason: "not-gm",
+      error: new Error("Only a GM can update Dynamic Initiative combat state."),
+    };
+  }
+
+  const previous = getState(live);
+  const previousRevision = Math.max(0, Number(previous?.revision ?? 0) || 0);
+  const combatantIds = combatantIdList(live);
+
+  let normalized;
+  try {
+    normalized = normalizeState(state, { combatantIds, includeHistory: true });
+  } catch (error) {
+    diag("state-update-failed", {
+      combatId: shortId(live.id),
+      reason: "normalize-failed",
+    });
+    console.error(`${MODULE_ID} | state normalization failed`, {
+      combatId: shortId(live.id),
+      reason: error?.message ?? "normalize-failed",
+    });
+    return {
+      ok: false,
+      combatId: live.id,
+      revision: previousRevision,
+      reason: "normalize-failed",
+      error,
+    };
+  }
+
+  const pruned = countPrunedCombatantEntries(state, normalized);
+  normalized.revision = previousRevision + 1;
+
+  diag("state-normalized", {
+    combatId: shortId(live.id),
+    phase: normalized.phase,
+    revision: normalized.revision,
+    combatants: combatantIds.length,
+    pruned,
+    reason,
   });
+
+  if (pruned > 0) {
+    diag("combatant-state-pruned", {
+      combatId: shortId(live.id),
+      pruned,
+      combatants: combatantIds.length,
+      revision: normalized.revision,
+    });
+  }
+
+  diag("state-update-queued", {
+    combatId: shortId(live.id),
+    phase: normalized.phase,
+    revision: normalized.revision,
+    reason,
+  });
+
+  diag("state-update-started", {
+    combatId: shortId(live.id),
+    phase: normalized.phase,
+    revision: normalized.revision,
+    reason,
+  });
+
+  const changes = buildCompleteStateUpdate(normalized);
+  const updateResult = await safeCombatUpdate(live, changes);
+  if (!updateResult.ok) {
+    diag("state-update-failed", {
+      combatId: shortId(live.id),
+      phase: normalized.phase,
+      revision: previousRevision,
+      reason: updateResult.reason,
+    });
+    return {
+      ok: false,
+      combatId: live.id,
+      revision: previousRevision,
+      reason: updateResult.reason,
+      error: updateResult.error,
+    };
+  }
+
+  const stored = getState(live);
+  const storedRevision = Number(stored?.revision ?? NaN);
+  if (Number.isFinite(storedRevision) && storedRevision !== normalized.revision) {
+    // Another writer may have interleaved outside our queue; report mismatch.
+    diag("state-update-stale", {
+      combatId: shortId(live.id),
+      revision: storedRevision,
+      expected: normalized.revision,
+    });
+  }
+
+  diag("state-update-complete", {
+    combatId: shortId(live.id),
+    phase: normalized.phase,
+    revision: normalized.revision,
+    combatants: combatantIds.length,
+    pruned,
+    reason,
+  });
+
+  return {
+    ok: true,
+    combatId: live.id,
+    revision: normalized.revision,
+    reason: null,
+    error: null,
+  };
 }
 
 /** Clear native initiative values for party combatants at each new round. */

@@ -97,8 +97,10 @@ scenario("7 combatants keep independent totals", () => {
 
 scenario("8 Enemy NPC activation uses canonical claim", () => {
   const claim = controllerSource.slice(controllerSource.indexOf("async function claimTurn"), controllerSource.indexOf("function isTurnEnded"));
-  assert.match(claim, /state\.phase === PHASES\.ENEMY/);
+  assert.match(claim, /liveState\.phase === PHASES\.ENEMY/);
   assert.equal((claim.match(/beginActivationObservation/g) ?? []).length, 1);
+  assert.match(claim, /finishActivationObservation/);
+  assert.equal(claim.includes("OtherActive"), false);
 });
 
 scenario("9 Rearguard PC activation uses canonical claim", () => {
@@ -107,6 +109,26 @@ scenario("9 Rearguard PC activation uses canonical claim", () => {
   assert.match(claim, /beginActivationObservation/);
 });
 
+scenario("9b Portrait switch pauses prior timer and starts a new session", () => {
+  let timing = start(createActivationTiming(), "pc1", 1000, "A");
+  timing = stop(timing, "pc1", 5000);
+  timing = start(timing, "pc2", 5000, "B");
+  assert.equal(timing.records.pc1.totalMs, 4000);
+  assert.equal(timing.records.pc1.activeSince, null);
+  assert.equal(timing.records.pc2.activeSince, 5000);
+  assert.equal(timing.records.pc2.activationCount, 1);
+  timing = stop(timing, "pc2", 9000);
+  timing = start(timing, "pc1", 9000, "A");
+  assert.equal(timing.records.pc1.activationCount, 2);
+  assert.equal(timing.records.pc1.activeSince, 9000);
+});
+
+scenario("9c Free claim switching is not blocked by another active combatant", () => {
+  const claim = controllerSource.slice(controllerSource.indexOf("async function claimTurn"), controllerSource.indexOf("function isTurnEnded"));
+  assert.equal(/activeCombatantId &&[\s\S]{0,80}OtherActive/.test(claim), false);
+  const uiClaim = uiSource.slice(uiSource.indexOf("function canUserClaim"), uiSource.indexOf("function canUserEndTurn"));
+  assert.equal(uiClaim.includes("activeCombatantId"), false);
+});
 scenario("10 Delay pauses timer", () => {
   let timing = start(createActivationTiming(), "pc", 1000);
   timing = stop(timing, "pc", 11000);

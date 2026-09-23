@@ -1,4 +1,4 @@
-# NelTempo 0.6.0 RC1
+# NelTempo 0.6.0 RC2
 
 NelTempo 0.6.0 adds informational real-world timing for combatants actively operated through NelTempo.
 
@@ -11,4 +11,8 @@ NelTempo 0.6.0 adds informational real-world timing for combatants actively oper
 - A primary-GM public combat-end card shows each safely labeled combatant’s activation count, total active time, average session time, and the encounter total.
 - World tracking and client display settings are independent. Disabling tracking stops new observations and suppresses the final summary; hiding the timer affects presentation only.
 
-Activation timing is observational only. It never invokes PF2e Start Turn or End Turn, changes phase placement or eligibility, blocks phase advancement, expires effects, or determines whether a turn is complete. No live Foundry/PF2e runtime acceptance is claimed by this local implementation.
+RC2 fixes:
+- Concurrent initiative submissions are serialized so one player's roll cannot erase another's Vanguard/Rearguard placement.
+- Clicking another eligible portrait pauses the prior activation timer and activates the new combatant without ending their turn.
+
+Activation timing is observational only. It never invokes PF2e Start Turn or End Turn, changes phase placement or eligibility, blocks phase advancement, expires effects, or determines whether a turn is complete. Foundry runtime acceptance is pending.

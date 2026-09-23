@@ -409,7 +409,7 @@ async function processSourceLinkedBoundarySafely(combat, state, combatantId, kin
       reason: error?.message ?? "source-link-boundary-failed",
     });
     try {
-      await reconcileSourceLinkedCombat(combat, { reason: "boundary-failed" });
+      await reconcileSourceLinkedCombat(combat, { reason: "boundary-failed", alreadyQueued: true });
     } catch (_reconcileError) {
       // Native PF2e Start/End remains authoritative and must still proceed.
     }
@@ -1117,29 +1117,33 @@ async function promptInitiative(combat, state) {
 }
 
 async function submitInitiativeResult(combat, state, payload, requestUser) {
-  if (state.phase !== PHASES.INITIATIVE || payload.promptId !== state.promptId) {
+  // Always re-read after the mutation queue so concurrent rolls see prior results.
+  const liveCombat = game.combats?.get?.(combat.id) ?? combat;
+  const liveState = getState(liveCombat) ?? state;
+
+  if (liveState.phase !== PHASES.INITIATIVE || payload.promptId !== liveState.promptId) {
     throw new Error(localize("NDI.Error.PromptInactive"));
   }
-  const combatant = getCombatant(combat, payload.combatantId);
+  const combatant = getCombatant(liveCombat, payload.combatantId);
   if (!combatant || combatantSide(combatant) !== "party") throw new Error(localize("NDI.Error.InvalidPlayerCombatant"));
   if (!userCanOwnCombatant(requestUser, combatant)) throw new Error(localize("NDI.Error.NotOwner"));
-  if (combatantPhase(state, combatant.id, "party") !== PLACEMENTS.PENDING) {
+  if (combatantPhase(liveState, combatant.id, "party") !== PLACEMENTS.PENDING) {
     throw new Error(localize("NDI.Error.InitiativeAlreadyResolved"));
   }
 
-  const next = submitResult(state, combatant.id, {
+  const next = submitResult(liveState, combatant.id, {
     total: payload.total,
     skill: payload.skill,
     label: payload.label,
   });
-  await persistState(combat, next, "submit-roll");
+  await persistState(liveCombat, next, "submit-roll");
   try {
     await combatant.actor?.setFlag?.(MODULE_ID, "lastInitiativeSkill", payload.skill);
   } catch (error) {
     debug("Unable to remember initiative skill on actor", error);
   }
 
-  const eligible = combat.combatants.filter(
+  const eligible = liveCombat.combatants.filter(
     (candidate) => combatantSide(candidate) === "party" && !isUnavailable(candidate),
   );
   const complete = eligible.every(
@@ -1148,7 +1152,7 @@ async function submitInitiativeResult(combat, state, payload, requestUser) {
   if (complete) {
     notify("info", localize("NDI.Notify.ChecksComplete"));
     next.promptOpen = false;
-    await persistState(combat, next, "prompt-complete");
+    await persistState(liveCombat, next, "prompt-complete");
   }
 }
 
@@ -1195,31 +1199,36 @@ function lifecycleAllowsActions(state) {
 }
 
 async function claimTurn(combat, state, payload, requestUser) {
-  if (!lifecycleAllowsActions(state)) {
+  const liveCombat = game.combats?.get?.(combat.id) ?? combat;
+  const liveState = getState(liveCombat) ?? state;
+
+  if (!lifecycleAllowsActions(liveState)) {
     throw new Error(localize("NDI.Lifecycle.NotOpen"));
   }
-  const combatant = getCombatant(combat, payload.combatantId);
+  const combatant = getCombatant(liveCombat, payload.combatantId);
   if (!combatant || isUnavailable(combatant)) throw new Error(localize("NDI.Error.CannotAct"));
-  if (!canClaimInPhase(combatant, state)) throw new Error(localize("NDI.Error.NotEligible"));
-  if (state.acted?.[combatant.id] || isTurnEnded(state, combatant.id)) {
+  if (!canClaimInPhase(combatant, liveState)) throw new Error(localize("NDI.Error.NotEligible"));
+  if (liveState.acted?.[combatant.id] || isTurnEnded(liveState, combatant.id)) {
     throw new Error(localize("NDI.Error.AlreadyActed"));
-  }
-  if (state.activeCombatantId && state.activeCombatantId !== combatant.id) {
-    throw new Error(localize("NDI.Error.OtherActive"));
   }
   if (!requestUser.isGM && !userCanOwnCombatant(requestUser, combatant)) {
     throw new Error(localize("NDI.Error.NotOwner"));
   }
-  if (state.phase === PHASES.ENEMY && !requestUser.isGM) throw new Error(localize("NDI.Error.GmOnlyEnemies"));
+  if (liveState.phase === PHASES.ENEMY && !requestUser.isGM) throw new Error(localize("NDI.Error.GmOnlyEnemies"));
 
-  let next = withHistory(state, `Activate ${combatantName(combatant)}`);
+  let next = withHistory(liveState, `Activate ${combatantName(combatant)}`);
+  // Free switching: pause the prior combatant's timer without ending their turn.
+  // Jumping between portraits must not invoke PF2e End Turn or mark acted.
+  if (next.activeCombatantId && next.activeCombatantId !== combatant.id) {
+    next = finishActivationObservation(next, next.activeCombatantId);
+  }
   next.activeCombatantId = combatant.id;
   // Canonical claim/activation is the sole timer start seam. Phase entry,
   // portrait token selection, reactions, Ready, and placement never call this.
   next = beginActivationObservation(next, combatant);
-  await persistState(combat, next, "claim-turn");
+  await persistState(liveCombat, next, "claim-turn");
   // Native turn marker only (turnEvents suppressed) — lifecycle already ran at phase start.
-  await setNativeTurn(combat, combatant.id);
+  await setNativeTurn(liveCombat, combatant.id);
 }
 
 function isTurnEnded(state, combatantId) {

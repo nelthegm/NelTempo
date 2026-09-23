@@ -177,7 +177,7 @@ function phaseCombatants(combat, state) {
 function canUserClaim(combatant, state) {
   if (isTurnFinished(state, combatant.id)) return false;
   if (lifecycleBusy(state)) return false;
-  if (state.activeCombatantId && state.activeCombatantId !== combatant.id) return false;
+  // Free switching: another active combatant no longer blocks claim.
   if (state.phase === PHASES.ENEMY) return game.user.isGM;
   return game.user.isGM || userCanOwnCombatant(game.user, combatant);
 }

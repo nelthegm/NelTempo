@@ -81,7 +81,7 @@ Prefer:
 | --- | --- |
 | Normalization | `normalizeState` prunes stale combatant keys, strips non-serializable data |
 | Persistence | `buildCompleteStateUpdate` + `saveState` atomic replace |
-| Concurrency | `runCombatMutation` serializes per-combat writes; re-entrant |
+| Concurrency | `runCombatMutation` serializes per-combat writes; `saveState` does not nest the queue (avoids mid-await races) |
 | Revision | Increment on successful save only |
 | Undo | `normalizeUndoRestore` against live combatants |
 | Debug | Client setting **Dynamic Initiative Debug Logging** (default false) |

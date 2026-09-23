@@ -212,12 +212,14 @@ export async function clearManagedRaisedShields(combat, state) {
   const next = foundry.utils.deepClone(state ?? {});
   next.shields = {};
   if (combat && state?.enabled) {
-    const result = await saveState(combat, next, { reason: "clear-shields" });
-    if (!result.ok) {
-      console.error(`${MODULE_ID} | Failed to clear defense tracking at combat end`, {
-        reason: result.reason,
-      });
-    }
+    await runCombatMutation(combat.id, async () => {
+      const result = await saveState(combat, next, { reason: "clear-shields" });
+      if (!result.ok) {
+        console.error(`${MODULE_ID} | Failed to clear defense tracking at combat end`, {
+          reason: result.reason,
+        });
+      }
+    });
   }
   return next;
 }
