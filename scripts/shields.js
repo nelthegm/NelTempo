@@ -211,15 +211,15 @@ export async function clearManagedRaisedShields(combat, state) {
   }
   const next = foundry.utils.deepClone(state ?? {});
   next.shields = {};
+  // Only called from endDynamicCombat, which is already inside runCombatMutation.
+  // Do not re-enter the queue here — that deadlocks End Combat and leaves the dock stuck.
   if (combat && state?.enabled) {
-    await runCombatMutation(combat.id, async () => {
-      const result = await saveState(combat, next, { reason: "clear-shields" });
-      if (!result.ok) {
-        console.error(`${MODULE_ID} | Failed to clear defense tracking at combat end`, {
-          reason: result.reason,
-        });
-      }
-    });
+    const result = await saveState(combat, next, { reason: "clear-shields" });
+    if (!result.ok) {
+      console.error(`${MODULE_ID} | Failed to clear defense tracking at combat end`, {
+        reason: result.reason,
+      });
+    }
   }
   return next;
 }

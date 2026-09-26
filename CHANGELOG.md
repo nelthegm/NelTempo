@@ -12,7 +12,8 @@
 - Adds 45 focused activation-timing scenarios and a Foundry/PF2e manual test plan.
 - Fixes concurrent initiative submissions overwriting each other when players roll at the same time (mutation queue no longer nests mid-await).
 - Allows free portrait activation switching: clicking another eligible portrait pauses the prior timer and activates the new combatant without ending their turn.
-- Manifest prepared for `v0.6.0-rc2`.
+- Fixes End Combat leaving the portrait dock stuck (shield cleanup no longer deadlocks the mutation queue; dock teardown hardened against remount races).
+- Manifest prepared for `v0.6.0-rc3`.
 
 ## 0.5.0
 

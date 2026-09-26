@@ -1835,31 +1835,56 @@ async function undo(combat, state) {
 
 async function endDynamicCombat(combat, state) {
   let timingState = getState(combat) ?? state;
-  const finalized = finishAllActivationObservations(timingState);
-  timingState = refreshActivationSummaryLabels(finalized.state, combat);
-  const shouldPostTiming =
-    isActivationTrackingEnabled() && !timingState.activationTiming?.summaryPosted;
+  try {
+    const finalized = finishAllActivationObservations(timingState);
+    timingState = refreshActivationSummaryLabels(finalized.state, combat);
+    const shouldPostTiming =
+      isActivationTrackingEnabled() && !timingState.activationTiming?.summaryPosted;
 
-  if (shouldPostTiming) {
-    const marked = markActivationSummaryPosted(timingState.activationTiming);
-    timingState.activationTiming = marked.timing;
-    // Persist the exactly-once claim before public emission so multiple GM
-    // clients or a repeated End request cannot duplicate the timing card.
-    await persistState(combat, timingState, "combat-timing-summary-claimed");
-    try {
-      await publicChat(activationTimingSummaryHTML(timingState.activationTiming));
-    } catch (error) {
-      console.error(`${MODULE_ID} | combat timing summary failed`, {
-        combatId: shortId(combat.id),
-        reason: error?.message ?? "summary-failed",
-      });
+    if (shouldPostTiming) {
+      const marked = markActivationSummaryPosted(timingState.activationTiming);
+      timingState.activationTiming = marked.timing;
+      // Persist the exactly-once claim before public emission so multiple GM
+      // clients or a repeated End request cannot duplicate the timing card.
+      await persistState(combat, timingState, "combat-timing-summary-claimed");
+      try {
+        await publicChat(activationTimingSummaryHTML(timingState.activationTiming));
+      } catch (error) {
+        console.error(`${MODULE_ID} | combat timing summary failed`, {
+          combatId: shortId(combat.id),
+          reason: error?.message ?? "summary-failed",
+        });
+      }
+    } else if (finalized.changed) {
+      await persistState(combat, timingState, "combat-timing-finalized");
     }
-  } else if (finalized.changed) {
-    await persistState(combat, timingState, "combat-timing-finalized");
+  } catch (error) {
+    console.error(`${MODULE_ID} | combat end timing cleanup failed`, {
+      combatId: shortId(combat.id),
+      reason: error?.message ?? "timing-cleanup-failed",
+    });
+    timingState = getState(combat) ?? timingState;
   }
 
-  await releaseSourceLinkedEffects(combat, timingState);
-  const cleaned = await clearManagedRaisedShields(combat, timingState);
+  try {
+    await releaseSourceLinkedEffects(combat, timingState);
+  } catch (error) {
+    console.error(`${MODULE_ID} | combat end source-link release failed`, {
+      combatId: shortId(combat.id),
+      reason: error?.message ?? "source-link-release-failed",
+    });
+  }
+
+  let cleaned = timingState;
+  try {
+    cleaned = await clearManagedRaisedShields(combat, timingState);
+  } catch (error) {
+    console.error(`${MODULE_ID} | combat end shield cleanup failed`, {
+      combatId: shortId(combat.id),
+      reason: error?.message ?? "shield-cleanup-failed",
+    });
+  }
+
   const next = foundry.utils.deepClone(cleaned ?? timingState);
   next.enabled = false;
   next.lifecycle = null;
@@ -1875,7 +1900,16 @@ async function endDynamicCombat(combat, state) {
     combatId: shortId(combat.id),
     revision: Number(next.revision ?? 0),
   });
-  await combat.delete();
+
+  try {
+    await combat.delete();
+  } catch (error) {
+    console.error(`${MODULE_ID} | combat delete failed after end cleanup`, {
+      combatId: shortId(combat.id),
+      reason: error?.message ?? "delete-failed",
+    });
+    throw error;
+  }
 }
 
 /* -------------------------------------------- */

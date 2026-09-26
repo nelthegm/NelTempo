@@ -1,4 +1,4 @@
-# NelTempo 0.6.0 RC2
+# NelTempo 0.6.0 RC3
 
 NelTempo 0.6.0 adds informational real-world timing for combatants actively operated through NelTempo.
 
@@ -14,5 +14,9 @@ NelTempo 0.6.0 adds informational real-world timing for combatants actively oper
 RC2 fixes:
 - Concurrent initiative submissions are serialized so one player's roll cannot erase another's Vanguard/Rearguard placement.
 - Clicking another eligible portrait pauses the prior activation timer and activates the new combatant without ending their turn.
+
+RC3 fixes:
+- End Combat no longer deadlocks while clearing managed shields, which previously left the portrait dock stuck on screen.
+- Dock teardown is hardened against remount races after combat deletion.
 
 Activation timing is observational only. It never invokes PF2e Start Turn or End Turn, changes phase placement or eligibility, blocks phase advancement, expires effects, or determines whether a turn is complete. Foundry runtime acceptance is pending.

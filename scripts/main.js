@@ -350,7 +350,11 @@ for (const hook of [
   Hooks.on(hook, () => queueMicrotask(renderDock));
 }
 
-Hooks.on("deleteCombat", () => removeUI());
+Hooks.on("deleteCombat", () => {
+  removeUI();
+  // Beat any updateCombat/deleteCombatant microtasks that could remount a stale dock.
+  queueMicrotask(removeUI);
+});
 Hooks.on("preDeleteCombat", (combat) => {
   const state = getState(combat);
   if (state?.enabled) void releaseSourceLinkedEffects(combat, state);

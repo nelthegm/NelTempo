@@ -1631,7 +1631,11 @@ function bindDockEvents(root, combat, state) {
         await requestAction(REQUESTS.UNDO);
         break;
       case "end-combat":
-        if (await confirmEndCombat()) await requestAction(REQUESTS.END_COMBAT);
+        if (await confirmEndCombat()) {
+          await requestAction(REQUESTS.END_COMBAT);
+          // Local teardown even if hook ordering races with queued renders.
+          removeUI();
+        }
         break;
       default:
         break;
@@ -1777,6 +1781,13 @@ export function renderDock() {
   }
 
   const combat = getCombat();
+  // Never remount against a deleted/zombie Combat that still sits on game.combat.
+  if (combat && !game.combats?.get?.(combat.id)) {
+    document.querySelectorAll(`.${MODAL_CLASS}`).forEach((element) => element.remove());
+    openPromptIds.clear();
+    syncNativeCombatTracker(false);
+    return;
+  }
   const state = getState(combat);
   syncNativeCombatTracker(Boolean(combat && state?.enabled));
   if (state?.phase !== PHASES.INITIATIVE) {
@@ -1967,6 +1978,11 @@ export function removeUI() {
   document.getElementById(LAUNCHER_ID)?.remove();
   document.querySelectorAll(`.${MODAL_CLASS}`).forEach((element) => element.remove());
   openPromptIds.clear();
+  if (overflowMenuCloser) {
+    document.removeEventListener("pointerdown", overflowMenuCloser, true);
+    document.removeEventListener("keydown", overflowMenuCloser, true);
+    overflowMenuCloser = null;
+  }
   syncNativeCombatTracker(false);
 }
 
