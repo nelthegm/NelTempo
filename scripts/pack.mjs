@@ -65,6 +65,7 @@ const INCLUDE = [
   "docs/RELEASE_NOTES_0.5.0.md",
   "docs/NELTEMPO_0.6.0_TEST_PLAN.md",
   "docs/RELEASE_NOTES_0.6.0.md",
+  "docs/GM_MACROS.md",
 ];
 
 function ensureIncludes() {

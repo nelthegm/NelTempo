@@ -409,7 +409,6 @@ function portraitHTML(combatant, state) {
   const activationActiveSince = Number(activationRecord?.activeSince);
   const showActivationTimer = Boolean(
     activationTimerPresentationEnabled() &&
-    state.activeCombatantId === combatant.id &&
     activationRecord?.activeSince != null &&
     Number.isFinite(activationActiveSince) &&
     activationActiveSince >= 0,

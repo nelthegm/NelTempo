@@ -135,24 +135,50 @@ export function stopAllActivationTiming(timing, { now = Date.now() } = {}) {
 }
 
 /**
- * Reload/setting reconciliation: only the proven canonical active combatant may
- * retain a running timestamp. Tracking-off closes every running segment.
+ * Reload/removal reconciliation for observational timers.
+ *
+ * - Tracking off closes every running segment.
+ * - When `liveCombatantIds` is provided, only stop segments for missing combatants.
+ * - Multiple concurrent running timers are allowed (canonical claim + GM out-of-turn).
+ * - Legacy `exclusiveActive: true` restores the old single-active filter.
  */
 export function reconcileActivationTiming(
   timing,
-  { activeCombatantId = null, trackingEnabled = true, now = Date.now() } = {},
+  {
+    activeCombatantId = null,
+    trackingEnabled = true,
+    now = Date.now(),
+    liveCombatantIds = null,
+    exclusiveActive = false,
+  } = {},
 ) {
   let next = cloneTiming(timing);
-  const allowed = trackingEnabled && activeCombatantId != null
-    ? String(activeCombatantId)
-    : null;
-  const stopped = [];
-  for (const [id, record] of Object.entries(next.records)) {
-    if (record.activeSince == null || id === allowed) continue;
-    const result = stopActivationTiming(next, id, { now });
-    next = result.timing;
-    if (result.changed) stopped.push(id);
+  if (!trackingEnabled) {
+    return stopAllActivationTiming(next, { now });
   }
+
+  const stopped = [];
+  if (exclusiveActive) {
+    const allowed = activeCombatantId != null ? String(activeCombatantId) : null;
+    for (const [id, record] of Object.entries(next.records)) {
+      if (record.activeSince == null || id === allowed) continue;
+      const result = stopActivationTiming(next, id, { now });
+      next = result.timing;
+      if (result.changed) stopped.push(id);
+    }
+    return { timing: next, changed: stopped.length > 0, stopped };
+  }
+
+  if (liveCombatantIds) {
+    const live = new Set([...liveCombatantIds].map((id) => String(id)));
+    for (const [id, record] of Object.entries(next.records)) {
+      if (record.activeSince == null || live.has(id)) continue;
+      const result = stopActivationTiming(next, id, { now });
+      next = result.timing;
+      if (result.changed) stopped.push(id);
+    }
+  }
+
   return { timing: next, changed: stopped.length > 0, stopped };
 }
 

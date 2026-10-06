@@ -114,4 +114,6 @@ export const REQUESTS = Object.freeze({
   PLACEMENT_CANCEL_QUEUE: "placement-cancel-queue",
   COUNTDOWN_SET: "countdown-set",
   COUNTDOWN_CLEAR: "countdown-clear",
+  /** GM-only observational timer toggle; does not claim a turn or change lifecycle. */
+  TOGGLE_ACTIVATION_TIMER: "toggle-activation-timer",
 });

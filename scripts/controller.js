@@ -375,6 +375,52 @@ function finishAllActivationObservations(state, now = Date.now()) {
   return { state: next, changed: result.changed, stopped: result.stopped };
 }
 
+function resolveCombatantForActivationTimer(combat, payload = {}) {
+  if (payload.combatantId) {
+    return getCombatant(combat, payload.combatantId);
+  }
+  const tokenId = payload.tokenId == null ? null : String(payload.tokenId);
+  if (!tokenId) return null;
+  return (
+    [...(combat.combatants ?? [])].find(
+      (combatant) =>
+        String(combatant.tokenId ?? "") === tokenId ||
+        String(combatant.token?.id ?? "") === tokenId,
+    ) ?? null
+  );
+}
+
+/**
+ * GM-only observational timer toggle. Starts or pauses wall-clock timing without
+ * claiming a turn, changing activeCombatantId, or invoking PF2e Start/End.
+ */
+async function toggleActivationTimer(combat, state, payload, requestUser) {
+  if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
+  if (!isActivationTrackingEnabled()) {
+    throw new Error(localize("NDI.Error.ActivationTimerTrackingOff"));
+  }
+  const combatant = resolveCombatantForActivationTimer(combat, payload);
+  if (!combatant || isUnavailable(combatant)) {
+    throw new Error(localize("NDI.Error.ActivationTimerNoCombatant"));
+  }
+
+  const live = getState(combat) ?? state;
+  const record = live.activationTiming?.records?.[combatant.id];
+  const running = record?.activeSince != null;
+  let next;
+  if (running) {
+    next = finishActivationObservation(live, combatant.id);
+    await persistState(combat, next, "activation-timer-toggle-stop");
+    notify("info", localize("NDI.Notify.ActivationTimerStopped", { name: combatantName(combatant) }));
+    return { ok: true, running: false, combatantId: combatant.id };
+  }
+
+  next = beginActivationObservation(live, combatant);
+  await persistState(combat, next, "activation-timer-toggle-start");
+  notify("info", localize("NDI.Notify.ActivationTimerStarted", { name: combatantName(combatant) }));
+  return { ok: true, running: true, combatantId: combatant.id };
+}
+
 function refreshActivationSummaryLabels(state, combat) {
   const next = structuredClone(state);
   for (const [combatantId, record] of Object.entries(next.activationTiming?.records ?? {})) {
@@ -1807,16 +1853,9 @@ async function undo(combat, state) {
     });
   }
   // Gameplay undo is state-only and must not erase observational history.
-  // Reconcile a running segment against the restored canonical active actor.
-  const restoredActiveId = toPersist.activeCombatantId == null
-    ? null
-    : String(toPersist.activeCombatantId);
-  const restoredTurn = restoredActiveId ? toPersist.lifecycle?.turns?.[restoredActiveId] : null;
-  const restoredProvesActive = Boolean(
-    restoredActiveId && restoredTurn && !restoredTurn.ended && !restoredTurn.skipped,
-  );
+  // Keep running timers for combatants that still exist after the restore.
   const reconciledTiming = reconcileActivationTiming(state.activationTiming, {
-    activeCombatantId: restoredProvesActive ? restoredActiveId : null,
+    liveCombatantIds: combatantIdList(combat),
     trackingEnabled: isActivationTrackingEnabled(),
   });
   toPersist.activationTiming = reconciledTiming.timing;
@@ -2629,6 +2668,8 @@ async function dispatchGMRequest(payload) {
     case REQUESTS.COUNTDOWN_CLEAR:
       if (!requestUser.isGM) throw new Error(localize("NDI.Error.GmOnly"));
       return await clearCountdown(combat, state, payload, requestUser);
+    case REQUESTS.TOGGLE_ACTIVATION_TIMER:
+      return await toggleActivationTimer(combat, state, payload, requestUser);
     default:
       throw new Error(`Unknown NelTempo request: ${payload.type}`);
   }
@@ -2714,10 +2755,8 @@ export async function reconcileActivationTimingAfterCombatantDeletion(combat = g
   return runCombatMutation(combat.id, async () => {
     const state = getState(combat);
     if (!state?.enabled) return;
-    const activeId = state.activeCombatantId == null ? null : String(state.activeCombatantId);
-    const liveActive = activeId && getCombatant(combat, activeId) ? activeId : null;
     const result = reconcileActivationTiming(state.activationTiming, {
-      activeCombatantId: liveActive,
+      liveCombatantIds: combatantIdList(combat),
       trackingEnabled: isActivationTrackingEnabled(),
     });
     if (!result.changed) return;
@@ -2737,18 +2776,8 @@ export async function reconcileLifecycleOnReady() {
   let state = getState(combat);
   if (!combat || !state?.enabled) return;
 
-  const activeId = state.activeCombatantId == null ? null : String(state.activeCombatantId);
-  const activeTurn = activeId ? state.lifecycle?.turns?.[activeId] : null;
-  const workflowProvesActive = Boolean(
-    activeId &&
-    state.lifecycle &&
-    [LIFECYCLE_STATUS.OPEN, LIFECYCLE_STATUS.COMPLETE].includes(state.lifecycle.status) &&
-    activeTurn &&
-    !activeTurn.ended &&
-    !activeTurn.skipped,
-  );
   const timingReconciled = reconcileActivationTiming(state.activationTiming, {
-    activeCombatantId: workflowProvesActive ? activeId : null,
+    liveCombatantIds: combatantIdList(combat),
     trackingEnabled: isActivationTrackingEnabled(),
   });
   if (timingReconciled.changed) {

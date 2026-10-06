@@ -82,6 +82,7 @@ if (existsSync(zipPath)) {
   assert.ok(entries.includes("docs/RELEASE_NOTES_0.5.0.md"), "ZIP includes 0.5.0 release notes");
   assert.ok(entries.includes("docs/NELTEMPO_0.6.0_TEST_PLAN.md"), "ZIP includes 0.6.0 runtime plan");
   assert.ok(entries.includes("docs/RELEASE_NOTES_0.6.0.md"), "ZIP includes 0.6.0 release notes");
+  assert.ok(entries.includes("docs/GM_MACROS.md"), "ZIP includes GM macros");
   assert.ok(entries.includes("scripts/activation-timing.js"), "ZIP includes activation timing helper");
   assert.equal(entries.some((e) => e.startsWith(".git")), false);
   assert.equal(entries.some((e) => e.startsWith("tests/")), false);
@@ -106,6 +107,6 @@ const manifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
 assert.equal(manifest.id, "nel-dynamic-initiative");
 assert.equal(manifest.title, "NelTempo");
 assert.equal(manifest.version, "0.6.0");
-assert.match(manifest.download, /\/v0\.6\.0-rc3\/dynamic-initiative\.zip$/);
+assert.match(manifest.download, /\/v0\.6\.0-rc4\/dynamic-initiative\.zip$/);
 
 console.log("Dynamic Initiative package-validate tests passed.");

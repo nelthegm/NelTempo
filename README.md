@@ -13,7 +13,7 @@ NelTempo replaces a fixed individual initiative order with four encounter phases
 
 At the end of Rearguard, the GM changes to Initiative. The round advances, global round-transition effects can be resolved, and players roll again.
 
-**Current development version:** 0.6.0 RC3
+**Current development version:** 0.6.0 RC4
 **Current stable version:** 0.5.0
 **Module ID:** `nel-dynamic-initiative`
 **Compatibility:** Foundry VTT V14 (verified 14.365), PF2e 8.4.0, Forge VTT hosting
@@ -28,12 +28,12 @@ Paste this manifest URL into Forge or Foundry’s module installer:
 https://raw.githubusercontent.com/nelthegm/NelTempo/main/module.json
 ```
 
-This channel currently serves the **0.6.0** implementation build (`v0.6.0-rc3`). Fixes concurrent initiative placement, free portrait activation switching, and End Combat dock teardown. The internal module ID remains `nel-dynamic-initiative`.
+This channel currently serves the **0.6.0** implementation build (`v0.6.0-rc4`). Adds GM activation-timer toggle for reactions/pause, plus prior RC fixes. The internal module ID remains `nel-dynamic-initiative`.
 
 Direct ZIP (fallback):
 
 ```
-https://github.com/nelthegm/NelTempo/releases/download/v0.6.0-rc3/dynamic-initiative.zip
+https://github.com/nelthegm/NelTempo/releases/download/v0.6.0-rc4/dynamic-initiative.zip
 ```
 ### Manual ZIP install
 
@@ -72,9 +72,9 @@ NelTempo tracks real combatant Start/End boundaries only. Reactions do not creat
 
 ## Activation timing (0.6.0)
 
-When **Track Combat Activation Time** is enabled, the primary GM records wall-clock time only while a combatant is actively claimed through NelTempo. Timing is informational: it never starts or ends a PF2e turn, changes placement or eligibility, blocks advancement, or determines completion. Delay pauses timing without invoking End Turn; claiming the delayed combatant in Rearguard begins another activation session while retaining the same actual turn lifecycle.
+When **Track Combat Activation Time** is enabled, the primary GM records wall-clock time while a combatant is claimed through NelTempo, and may also start or pause observational timers with the GM macro `game.dynamicInitiative.toggleActivationTimer()` (select a token first). Timing is informational: it never starts or ends a PF2e turn, changes placement or eligibility, blocks advancement, or determines completion. Delay pauses timing without invoking End Turn; claiming the delayed combatant in Rearguard begins another activation session while retaining the same actual turn lifecycle. Multiple combatants may have running timers at once (for example, an active turn plus a reaction).
 
-Clients may independently disable **Show Live Activation Timer** while world tracking continues. The timer updates locally about once per second without saving the Combat document on each tick. Normal NelTempo End Combat posts one public informational table containing activation count, total active time, average session time, and the encounter’s total active time. Hidden combatants use a neutral label.
+Clients may independently disable **Show Live Activation Timer** while world tracking continues. The timer updates locally about once per second without saving the Combat document on each tick. Normal NelTempo End Combat posts one public informational table containing activation count, total active time, average session time, and the encounter’s total active time. Hidden combatants use a neutral label. See `docs/GM_MACROS.md`.
 
 ## Source-linked timing (0.5.0)
 

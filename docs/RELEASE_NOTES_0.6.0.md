@@ -1,22 +1,13 @@
-# NelTempo 0.6.0 RC3
+# NelTempo 0.6.0 RC4
 
 NelTempo 0.6.0 adds informational real-world timing for combatants actively operated through NelTempo.
 
-- Timing starts only through the canonical NelTempo claim/activation workflow.
-- Phase entry, portrait token selection, reactions, Ready, and placement changes do not start timing.
-- Delay closes the current timing segment without invoking End Turn. Rearguard claim resumes timing as a new activation session while preserving the same actual turn.
-- Successful End Turn and administrative workflow closure finalize timing exactly once. A failed or ambiguous native End keeps timing available for review and reload reconciliation.
-- Durable schema-10 timestamps survive reload; completed time is never erased by Reopen.
-- The live `M:SS` timer uses one client-local ticker and never saves the Combat document every second.
-- A primary-GM public combat-end card shows each safely labeled combatant’s activation count, total active time, average session time, and the encounter total.
-- World tracking and client display settings are independent. Disabling tracking stops new observations and suppresses the final summary; hiding the timer affects presentation only.
+RC4:
+- Adds GM-only `game.dynamicInitiative.toggleActivationTimer()` to start or pause observational timers without claiming a turn (reactions, Ready, temporary pause).
+- Portrait timers display for any combatant with a running observation, not only the claimed active turn.
+- Multiple concurrent observational timers are allowed.
+- See `docs/GM_MACROS.md`.
 
-RC2 fixes:
-- Concurrent initiative submissions are serialized so one player's roll cannot erase another's Vanguard/Rearguard placement.
-- Clicking another eligible portrait pauses the prior activation timer and activates the new combatant without ending their turn.
+Also includes prior RC fixes for concurrent initiative placement, free portrait activation switching, and End Combat dock teardown.
 
-RC3 fixes:
-- End Combat no longer deadlocks while clearing managed shields, which previously left the portrait dock stuck on screen.
-- Dock teardown is hardened against remount races after combat deletion.
-
-Activation timing is observational only. It never invokes PF2e Start Turn or End Turn, changes phase placement or eligibility, blocks phase advancement, expires effects, or determines whether a turn is complete. Foundry runtime acceptance is pending.
+Foundry runtime acceptance is pending.

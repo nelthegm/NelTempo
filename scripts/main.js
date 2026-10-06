@@ -328,6 +328,26 @@ Hooks.once("ready", () => {
     undo: () => requestAction(REQUESTS.UNDO),
     end: () => requestAction(REQUESTS.END_COMBAT),
     render: renderDock,
+    /**
+     * GM-only: toggle observational activation timer for a combatant.
+     * Pass a combatant id, or select one encounter token and omit the argument.
+     * Does not claim a turn or change PF2e/lifecycle state.
+     */
+    toggleActivationTimer: (combatantId = null) => {
+      if (!game.user?.isGM) {
+        ui?.notifications?.warn?.(game.i18n.localize("NDI.Error.GmOnly"));
+        return { ok: false, reason: "gm-only" };
+      }
+      if (combatantId) {
+        return requestAction(REQUESTS.TOGGLE_ACTIVATION_TIMER, { combatantId: String(combatantId) });
+      }
+      const token = canvas?.tokens?.controlled?.[0];
+      if (!token?.id) {
+        ui?.notifications?.warn?.(game.i18n.localize("NDI.Notify.ActivationTimerSelectToken"));
+        return { ok: false, reason: "no-token" };
+      }
+      return requestAction(REQUESTS.TOGGLE_ACTIVATION_TIMER, { tokenId: token.id });
+    },
   });
 
   void reconcileLifecycleOnReady().then(() =>

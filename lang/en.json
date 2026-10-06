@@ -168,7 +168,12 @@
   "NDI.Setting.TrackActivationTime.Name": "Track Combat Activation Time",
   "NDI.Setting.TrackActivationTime.Hint": "Record informational wall-clock time only while a combatant is actively operated through NelTempo. Timing never controls turn lifecycle or PF2e mechanics.",
   "NDI.Setting.ShowActivationTimer.Name": "Show Live Activation Timer",
-  "NDI.Setting.ShowActivationTimer.Hint": "Show a locally updating timer beneath the active combatant portrait. Turning this off does not disable world timing or the combat summary.",
+  "NDI.Setting.ShowActivationTimer.Hint": "Show a locally updating timer beneath any combatant portrait with a running observation. Turning this off does not disable world timing or the combat summary.",
+  "NDI.Notify.ActivationTimerStarted": "Activation timer started for {name}.",
+  "NDI.Notify.ActivationTimerStopped": "Activation timer paused for {name}.",
+  "NDI.Notify.ActivationTimerSelectToken": "Select one encounter token, then run the timer toggle again.",
+  "NDI.Error.ActivationTimerTrackingOff": "Activation timing tracking is disabled in world settings.",
+  "NDI.Error.ActivationTimerNoCombatant": "That token is not in the active NelTempo encounter.",
 
   "NDI.Notify.SelectTokens": "Select the tokens that belong in the encounter, then start NelTempo again.",
   "NDI.Notify.AlreadyActive": "NelTempo is already active for this encounter.",

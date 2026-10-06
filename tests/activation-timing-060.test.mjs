@@ -26,6 +26,8 @@ const controllerSource = readFileSync(join(root, "scripts/controller.js"), "utf8
 const portraitSource = readFileSync(join(root, "scripts/portrait-activation.js"), "utf8");
 const uiSource = readFileSync(join(root, "scripts/ui.js"), "utf8");
 const lifecycleSource = readFileSync(join(root, "scripts/lifecycle.js"), "utf8");
+const mainSource = readFileSync(join(root, "scripts/main.js"), "utf8");
+const constantsSource = readFileSync(join(root, "scripts/constants.js"), "utf8");
 
 let count = 0;
 function scenario(name, test) {
@@ -218,7 +220,10 @@ scenario("21 reopened activation adds a session and time", () => {
 
 scenario("22 reload preserves proven activeSince", () => {
   const timing = start(createActivationTiming(), "pc", 1000);
-  const result = reconcileActivationTiming(timing, { activeCombatantId: "pc", now: 9000 });
+  const result = reconcileActivationTiming(timing, {
+    liveCombatantIds: ["pc"],
+    now: 9000,
+  });
   assert.equal(result.changed, false);
   assert.equal(result.timing.records.pc.activeSince, 1000);
 });
@@ -226,11 +231,65 @@ scenario("22 reload preserves proven activeSince", () => {
 scenario("23 reload after finalized segment does not duplicate", () => {
   let timing = start(createActivationTiming(), "pc", 1000);
   timing = stop(timing, "pc", 5000);
-  const result = reconcileActivationTiming(timing, { activeCombatantId: null, now: 9000 });
+  const result = reconcileActivationTiming(timing, {
+    liveCombatantIds: ["pc"],
+    now: 9000,
+  });
   assert.equal(result.changed, false);
   assert.equal(result.timing.records.pc.totalMs, 4000);
 });
 
+scenario("23b concurrent out-of-turn timers survive reconcile", () => {
+  let timing = start(createActivationTiming(), "pc1", 1000);
+  timing = start(timing, "pc2", 2000);
+  const result = reconcileActivationTiming(timing, {
+    liveCombatantIds: ["pc1", "pc2"],
+    now: 9000,
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.timing.records.pc1.activeSince, 1000);
+  assert.equal(result.timing.records.pc2.activeSince, 2000);
+});
+
+scenario("23c removed combatant running timer is closed", () => {
+  let timing = start(createActivationTiming(), "pc1", 1000);
+  timing = start(timing, "pc2", 2000);
+  const result = reconcileActivationTiming(timing, {
+    liveCombatantIds: ["pc1"],
+    now: 5000,
+  });
+  assert.equal(result.changed, true);
+  assert.equal(result.timing.records.pc1.activeSince, 1000);
+  assert.equal(result.timing.records.pc2.activeSince, null);
+  assert.equal(result.timing.records.pc2.totalMs, 3000);
+});
+
+scenario("23d exclusiveActive legacy filter still available", () => {
+  let timing = start(createActivationTiming(), "pc1", 1000);
+  timing = start(timing, "pc2", 2000);
+  const result = reconcileActivationTiming(timing, {
+    exclusiveActive: true,
+    activeCombatantId: "pc1",
+    now: 5000,
+  });
+  assert.equal(result.changed, true);
+  assert.equal(result.timing.records.pc1.activeSince, 1000);
+  assert.equal(result.timing.records.pc2.activeSince, null);
+});
+
+scenario("23e GM timer toggle API is exposed without claiming", () => {
+  assert.match(mainSource, /toggleActivationTimer/);
+  assert.match(constantsSource, /TOGGLE_ACTIVATION_TIMER/);
+  const toggle = controllerSource.slice(
+    controllerSource.indexOf("async function toggleActivationTimer"),
+    controllerSource.indexOf("function refreshActivationSummaryLabels"),
+  );
+  assert.match(toggle, /beginActivationObservation/);
+  assert.match(toggle, /finishActivationObservation/);
+  assert.equal(toggle.includes("setNativeTurn"), false);
+  assert.equal(toggle.includes("activeCombatantId ="), false);
+  assert.match(toggle, /requestUser\.isGM/);
+});
 scenario("24 malformed activeSince fails safely", () => {
   const timing = normalizeActivationTiming({ records: { pc: { totalMs: 4, activationCount: 1, activeSince: "bad" } } });
   assert.equal(timing.records.pc.activeSince, null);
